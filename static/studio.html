@@ -76,6 +76,15 @@
           <span>Tinggi sumber <output data-output="source.cropHeight"></output></span>
           <input data-path="source.cropHeight" data-unit="%" type="range" min="5" max="100" step="1">
         </label>
+        <label class="select-control">
+          <span>Cara isi frame mata</span>
+          <select id="sourceFitSelect" data-path="source.fit" aria-label="Cara gambar mengisi frame mata">
+            <option value="contain">Pas - utuh dengan bar hitam</option>
+            <option value="cover">Penuhi - potong sisi bila perlu</option>
+            <option value="stretch">Regang - tanpa bar hitam</option>
+          </select>
+        </label>
+        <p class="control-note" id="fitMeta">Pas menjaga game tetap utuh di dalam lensa.</p>
       </section>
 
       <section class="control-section stream-section">
@@ -91,10 +100,22 @@
           <span>Kualitas JPEG <output data-output="capture.quality"></output></span>
           <input data-path="capture.quality" data-unit="%" type="range" min="30" max="95" step="1">
         </label>
-        <label class="range-control">
-          <span>Resolusi capture <output data-output="capture.scale"></output></span>
-          <input data-path="capture.scale" data-unit="x" data-decimals="2" type="range" min="0.25" max="1" step="0.01">
-        </label>
+        <div class="section-title stream-resolution-title">
+          <span>Ukuran frame</span>
+          <span class="micro-pill" id="streamResolution">960 x 540</span>
+        </div>
+        <div class="preset-grid stream-presets">
+          <button class="preset-button active" data-stream-preset="light" type="button">
+            <b>Ringan</b><small>960 x 540</small>
+          </button>
+          <button class="preset-button" data-stream-preset="game" type="button">
+            <b>Game 720p</b><small>1280 x 720</small>
+          </button>
+          <button class="preset-button" data-stream-preset="sharp" type="button">
+            <b>Tajam 900p</b><small>1600 x 900</small>
+          </button>
+        </div>
+        <p class="control-note" id="streamMeta">Frame dikirim satu kali, lalu digandakan oleh GPU HP.</p>
         <label class="switch-control">
           <span>
             <b>Jeda capture</b>
@@ -112,13 +133,13 @@
         </div>
         <div class="preset-grid quality-presets">
           <button class="preset-button active" data-quality-preset="latency" type="button">
-            <b>Game 30+</b><small>36 fps / stabil</small>
+            <b>Game 30+</b><small>36 fps / JPEG ringan</small>
           </button>
           <button class="preset-button" data-quality-preset="balanced" type="button">
-            <b>Visual</b><small>30 fps / lebih tajam</small>
+            <b>Visual</b><small>30 fps / JPEG sedang</small>
           </button>
           <button class="preset-button" data-quality-preset="clarity" type="button">
-            <b>Tajam</b><small>30 fps / detail</small>
+            <b>Detail</b><small>30 fps / JPEG tinggi</small>
           </button>
         </div>
       </section>

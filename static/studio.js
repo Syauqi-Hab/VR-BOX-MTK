@@ -17,9 +17,14 @@
   var controls = Array.prototype.slice.call(document.querySelectorAll("[data-path]"));
   var outputNodes = Array.prototype.slice.call(document.querySelectorAll("[data-output]"));
   var qualityPresets = {
-    latency: { fps: 36, quality: 58, scale: 0.5 },
-    balanced: { fps: 30, quality: 72, scale: 0.72 },
-    clarity: { fps: 30, quality: 85, scale: 0.86 }
+    latency: { fps: 36, quality: 58 },
+    balanced: { fps: 30, quality: 72 },
+    clarity: { fps: 30, quality: 85 }
+  };
+  var streamPresets = {
+    light: { width: 960, height: 540 },
+    game: { width: 1280, height: 720 },
+    sharp: { width: 1600, height: 900 }
   };
   var headsetPresets = {
     wide: {
@@ -101,6 +106,8 @@
     });
     syncPresetButtons();
     updateDisplayMeta();
+    updateFitMeta();
+    updateStreamMeta();
   }
 
   function valuesMatch(actual, expected) {
@@ -116,6 +123,10 @@
     Array.prototype.slice.call(document.querySelectorAll("[data-quality-preset]")).forEach(function (button) {
       var preset = qualityPresets[button.dataset.qualityPreset];
       button.classList.toggle("active", valuesMatch(settings.capture, preset));
+    });
+    Array.prototype.slice.call(document.querySelectorAll("[data-stream-preset]")).forEach(function (button) {
+      var preset = streamPresets[button.dataset.streamPreset];
+      button.classList.toggle("active", valuesMatch(settings.stream, preset));
     });
     Array.prototype.slice.call(document.querySelectorAll("[data-headset-preset]")).forEach(function (button) {
       var preset = headsetPresets[button.dataset.headsetPreset];
@@ -157,6 +168,37 @@
       return;
     }
     node.textContent = backend.detail || "Mesin capture sedang diperbarui.";
+  }
+
+  function updateFitMeta() {
+    var node = document.getElementById("fitMeta");
+    if (!node || !settings) {
+      return;
+    }
+    if (settings.source.fit === "cover") {
+      node.textContent = "Penuhi seluruh lensa; sisi gambar dapat terpotong pada game 16:9.";
+    } else if (settings.source.fit === "stretch") {
+      node.textContent = "Regang tanpa area hitam; rasio game dapat terlihat melebar atau gepeng.";
+    } else {
+      node.textContent = "Pas menjaga game tetap utuh; area lensa kosong dibuat hitam otomatis.";
+    }
+  }
+
+  function updateStreamMeta() {
+    var label = document.getElementById("streamResolution");
+    var note = document.getElementById("streamMeta");
+    if (!settings || !settings.stream) {
+      return;
+    }
+    var width = settings.stream.width;
+    var height = settings.stream.height;
+    var pixels = width * height / 1000000;
+    if (label) {
+      label.textContent = width + " x " + height;
+    }
+    if (note) {
+      note.textContent = "" + width + " x " + height + " (" + pixels.toFixed(2) + " MP). Satu frame 16:9 digandakan oleh GPU HP.";
+    }
   }
 
   function applySettingsGroup(group, values) {
@@ -349,6 +391,12 @@
     });
   });
 
+  Array.prototype.slice.call(document.querySelectorAll("[data-stream-preset]")).forEach(function (button) {
+    button.addEventListener("click", function () {
+      applySettingsGroup("stream", streamPresets[button.dataset.streamPreset]);
+    });
+  });
+
   Array.prototype.slice.call(document.querySelectorAll("[data-headset-preset]")).forEach(function (button) {
     button.addEventListener("click", function () {
       applySettingsGroup("headset", headsetPresets[button.dataset.headsetPreset]);
@@ -414,10 +462,18 @@
     };
   }
 
-  function drawImageCover(image, crop, x, y, width, height, zoom, shiftX, shiftY) {
-    var ratio = Math.max(width / crop.width, height / crop.height) * zoom;
-    var renderedWidth = crop.width * ratio;
-    var renderedHeight = crop.height * ratio;
+  function drawImageFit(image, crop, x, y, width, height, fit, zoom, shiftX, shiftY) {
+    var renderedWidth;
+    var renderedHeight;
+    if (fit === "stretch") {
+      renderedWidth = width * zoom;
+      renderedHeight = height * zoom;
+    } else {
+      var scaleBase = fit === "cover" ? Math.max : Math.min;
+      var ratio = scaleBase(width / crop.width, height / crop.height) * zoom;
+      renderedWidth = crop.width * ratio;
+      renderedHeight = crop.height * ratio;
+    }
     context.save();
     context.beginPath();
     context.rect(x, y, width, height);
@@ -494,7 +550,18 @@
 
   function drawEye(image, crop, x, y, width, height, side, imageShiftX, imageShiftY) {
     var color = side === "L" ? "#ff775f" : "#75e2da";
-    drawImageCover(image, crop, x, y, width, height, settings.headset.zoom, imageShiftX, imageShiftY);
+    drawImageFit(
+      image,
+      crop,
+      x,
+      y,
+      width,
+      height,
+      settings.source.fit,
+      settings.headset.zoom,
+      imageShiftX,
+      imageShiftY
+    );
     context.fillStyle = "rgba(0, 0, 0, 0.14)";
     context.fillRect(x, y, width, height);
 

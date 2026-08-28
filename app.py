@@ -41,6 +41,7 @@ CONFIG_PATH = APP_DIR / "lenscast-settings.json"
 BOUNDARY = "lenscast-frame"
 DISPLAY_ID_PATTERN = re.compile(r"^\\\\\.\\DISPLAY\d+$", re.IGNORECASE)
 CAPTURE_BACKENDS = {"auto", "dxgi", "pillow"}
+SOURCE_FIT_MODES = {"contain", "cover", "stretch"}
 
 DEFAULT_SETTINGS: dict[str, dict[str, Any]] = {
     "capture": {
@@ -48,14 +49,19 @@ DEFAULT_SETTINGS: dict[str, dict[str, Any]] = {
         "backend": "auto",
         "fps": 36,
         "quality": 58,
-        "scale": 0.5,
+        "scale": 0.5,  # Legacy setting retained for existing settings files.
         "paused": False,
+    },
+    "stream": {
+        "width": 960,
+        "height": 540,
     },
     "source": {
         "cropX": 0,
         "cropY": 0,
         "cropWidth": 100,
         "cropHeight": 100,
+        "fit": "contain",
     },
     "headset": {
         "eyeWidth": 92,
@@ -76,6 +82,8 @@ NUMERIC_LIMITS: dict[tuple[str, str], tuple[float, float, type]] = {
     ("capture", "fps"): (5, 60, int),
     ("capture", "quality"): (30, 95, int),
     ("capture", "scale"): (0.25, 1.0, float),
+    ("stream", "width"): (320, 1920, int),
+    ("stream", "height"): (180, 1080, int),
     ("source", "cropX"): (0, 95, float),
     ("source", "cropY"): (0, 95, float),
     ("source", "cropWidth"): (5, 100, float),
@@ -116,6 +124,10 @@ def sanitize_settings(candidate: Any) -> dict[str, dict[str, Any]]:
                 if isinstance(raw_value, str) and raw_value in CAPTURE_BACKENDS:
                     result[group][key] = raw_value
                 continue
+            if (group, key) == ("source", "fit"):
+                if isinstance(raw_value, str) and raw_value in SOURCE_FIT_MODES:
+                    result[group][key] = raw_value
+                continue
             if (group, key) == ("capture", "paused"):
                 if isinstance(raw_value, bool):
                     result[group][key] = raw_value
@@ -127,7 +139,14 @@ def sanitize_settings(candidate: Any) -> dict[str, dict[str, Any]]:
             if not isinstance(raw_value, (int, float)):
                 continue
             value = min(maximum, max(minimum, float(raw_value)))
-            result[group][key] = int(round(value)) if expected_type is int else round(value, 4)
+            if expected_type is int:
+                integer_value = int(round(value))
+                # Even dimensions keep the stream ready for future H.264 encoders.
+                if group == "stream":
+                    integer_value -= integer_value % 2
+                result[group][key] = integer_value
+            else:
+                result[group][key] = round(value, 4)
 
     # Keep the crop rectangle inside the captured desktop.
     source = result["source"]
@@ -207,6 +226,29 @@ def placeholder_frame(message: str = "Preparing desktop capture") -> tuple[bytes
     buffer = io.BytesIO()
     image.save(buffer, format="JPEG", quality=82)
     return buffer.getvalue(), width, height
+
+
+def fit_image_to_stream(image: Image.Image, width: int, height: int) -> Image.Image:
+    """Resize to a stable stream frame without cropping or stretching the source."""
+    if image.width < 1 or image.height < 1:
+        raise RuntimeError("Capture returned an empty image.")
+
+    scale = min(width / image.width, height / image.height)
+    resized_size = (
+        max(1, round(image.width * scale)),
+        max(1, round(image.height * scale)),
+    )
+    if image.size != resized_size:
+        image = image.resize(resized_size, Image.Resampling.BILINEAR)
+    if image.mode != "RGB":
+        image = image.convert("RGB")
+
+    if image.size == (width, height):
+        return image
+
+    frame = Image.new("RGB", (width, height), "black")
+    frame.paste(image, ((width - image.width) // 2, (height - image.height) // 2))
+    return frame
 
 
 def configure_dpi_awareness() -> None:
@@ -708,7 +750,9 @@ class DesktopCapture:
     def _capture_loop(self) -> None:
         next_frame_at = time.monotonic()
         while self._running.is_set():
-            capture_settings = self._settings.get()["capture"]
+            current_settings = self._settings.get()
+            capture_settings = current_settings["capture"]
+            stream_settings = current_settings["stream"]
             if capture_settings["paused"]:
                 time.sleep(0.12)
                 next_frame_at = time.monotonic()
@@ -722,15 +766,11 @@ class DesktopCapture:
                     active_backend,
                     backend_detail,
                 ) = self._capture_image(capture_settings)
-                scale = capture_settings["scale"]
-                if scale < 0.999:
-                    target_size = (
-                        max(2, int(image.width * scale)),
-                        max(2, int(image.height * scale)),
-                    )
-                    image = image.resize(target_size, Image.Resampling.BILINEAR)
-                if image.mode != "RGB":
-                    image = image.convert("RGB")
+                image = fit_image_to_stream(
+                    image,
+                    stream_settings["width"],
+                    stream_settings["height"],
+                )
                 buffer = io.BytesIO()
                 image.save(
                     buffer,

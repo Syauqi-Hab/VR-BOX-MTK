@@ -33,6 +33,9 @@
     "uniform sampler2D uTexture;",
     "uniform vec4 uCrop;",
     "uniform vec2 uFrame;",
+    "uniform float uSourceAspect;",
+    "uniform float uEyeAspect;",
+    "uniform float uFitMode;",
     "uniform float uGap;",
     "uniform vec2 uOffset;",
     "uniform float uZoom;",
@@ -52,7 +55,6 @@
     "  }",
     "  point.x -= eyeSign * uOffset.x;",
     "  point.y -= uOffset.y;",
-    "  point /= uZoom;",
     "  float radiusSquared = dot(point, point);",
     "  point *= 1.0 + uBarrel * radiusSquared;",
     "  point.x *= 1.0 - uCurvature * 4.0 * point.x * point.x;",
@@ -60,7 +62,27 @@
     "    gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0);",
     "    return;",
     "  }",
-    "  vec2 sourceUv = uCrop.xy + (point + 0.5) * uCrop.zw;",
+    "  vec2 displaySize = vec2(1.0);",
+    "  if (uFitMode < 0.5) {",
+    "    if (uSourceAspect > uEyeAspect) {",
+    "      displaySize.y = uEyeAspect / uSourceAspect;",
+    "    } else {",
+    "      displaySize.x = uSourceAspect / uEyeAspect;",
+    "    }",
+    "  } else if (uFitMode < 1.5) {",
+    "    if (uSourceAspect > uEyeAspect) {",
+    "      displaySize.x = uSourceAspect / uEyeAspect;",
+    "    } else {",
+    "      displaySize.y = uEyeAspect / uSourceAspect;",
+    "    }",
+    "  }",
+    "  displaySize *= uZoom;",
+    "  vec2 sourcePoint = (point + 0.5 - (vec2(1.0) - displaySize) * 0.5) / displaySize;",
+    "  if (sourcePoint.x < 0.0 || sourcePoint.x > 1.0 || sourcePoint.y < 0.0 || sourcePoint.y > 1.0) {",
+    "    gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0);",
+    "    return;",
+    "  }",
+    "  vec2 sourceUv = uCrop.xy + sourcePoint * uCrop.zw;",
     "  vec3 color = texture2D(uTexture, sourceUv).rgb * uBrightness;",
     "  gl_FragColor = vec4(color, 1.0);",
     "}"
@@ -88,6 +110,16 @@
   function numberFormat(value, control) {
     var decimals = Number(control.dataset.decimals || 0);
     return Number(value).toFixed(decimals) + (control.dataset.unit || "");
+  }
+
+  function fitModeValue(fit) {
+    if (fit === "cover") {
+      return 1;
+    }
+    if (fit === "stretch") {
+      return 2;
+    }
+    return 0;
   }
 
   function rangeFill(control) {
@@ -199,6 +231,9 @@
         texture: gl.getUniformLocation(program, "uTexture"),
         crop: gl.getUniformLocation(program, "uCrop"),
         frame: gl.getUniformLocation(program, "uFrame"),
+        sourceAspect: gl.getUniformLocation(program, "uSourceAspect"),
+        eyeAspect: gl.getUniformLocation(program, "uEyeAspect"),
+        fitMode: gl.getUniformLocation(program, "uFitMode"),
         gap: gl.getUniformLocation(program, "uGap"),
         offset: gl.getUniformLocation(program, "uOffset"),
         zoom: gl.getUniformLocation(program, "uZoom"),
@@ -206,6 +241,7 @@
         curvature: gl.getUniformLocation(program, "uCurvature"),
         brightness: gl.getUniformLocation(program, "uBrightness")
       };
+      var lastTextureUploadAt = 0;
 
       function resize() {
         var ratio = Math.min(window.devicePixelRatio || 1, 2);
@@ -226,10 +262,14 @@
         gl.vertexAttribPointer(position, 2, gl.FLOAT, false, 0, 0);
         gl.activeTexture(gl.TEXTURE0);
         gl.bindTexture(gl.TEXTURE_2D, texture);
-        if (streamImage.naturalWidth > 0) {
+        var captureFps = settings && settings.capture ? Number(settings.capture.fps) : 30;
+        var uploadInterval = 1000 / Math.max(5, Math.min(60, captureFps || 30));
+        var now = window.performance && window.performance.now ? window.performance.now() : Date.now();
+        if (streamImage.naturalWidth > 0 && now - lastTextureUploadAt >= uploadInterval) {
           try {
             gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
             gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, streamImage);
+            lastTextureUploadAt = now;
           } catch (error) {
             // Browsers can reject a frame while the MJPEG image is being replaced.
           }
@@ -239,6 +279,13 @@
           eyeWidth: 92, eyeHeight: 90, eyeGap: 2, eyeOffsetX: 0, eyeOffsetY: 0,
           zoom: 1, barrel: 0.12, curvature: 0.08, brightness: 1
         };
+        var stream = settings && settings.stream ? settings.stream : { width: 16, height: 9 };
+        var sourceWidth = streamImage.naturalWidth || stream.width;
+        var sourceHeight = streamImage.naturalHeight || stream.height;
+        var sourceAspect = (sourceWidth * source.cropWidth) /
+          Math.max(1, sourceHeight * source.cropHeight);
+        var eyeAspect = (canvas.width * headset.eyeWidth) /
+          Math.max(1, canvas.height * 2 * headset.eyeHeight);
         gl.uniform1i(uniforms.texture, 0);
         gl.uniform4f(
           uniforms.crop,
@@ -248,6 +295,9 @@
           source.cropHeight / 100
         );
         gl.uniform2f(uniforms.frame, headset.eyeWidth / 100, headset.eyeHeight / 100);
+        gl.uniform1f(uniforms.sourceAspect, sourceAspect);
+        gl.uniform1f(uniforms.eyeAspect, eyeAspect);
+        gl.uniform1f(uniforms.fitMode, fitModeValue(source.fit));
         gl.uniform1f(uniforms.gap, headset.eyeGap / 100);
         gl.uniform2f(uniforms.offset, headset.eyeOffsetX / 100, headset.eyeOffsetY / 100);
         gl.uniform1f(uniforms.zoom, headset.zoom);
@@ -267,7 +317,7 @@
   function createCanvasFallback() {
     var context = canvas.getContext("2d");
 
-    function drawEye(image, crop, x, y, width, height, eyeSign, headset) {
+    function drawEye(image, crop, x, y, width, height, eyeSign, headset, fit) {
       context.save();
       context.beginPath();
       context.rect(x, y, width, height);
@@ -276,9 +326,17 @@
       var cropHeight = image.naturalHeight * crop.cropHeight / 100;
       var cropX = image.naturalWidth * crop.cropX / 100;
       var cropY = image.naturalHeight * crop.cropY / 100;
-      var scale = Math.max(width / cropWidth, height / cropHeight) * headset.zoom;
-      var imageWidth = cropWidth * scale;
-      var imageHeight = cropHeight * scale;
+      var imageWidth;
+      var imageHeight;
+      if (fit === "stretch") {
+        imageWidth = width * headset.zoom;
+        imageHeight = height * headset.zoom;
+      } else {
+        var scaleBase = fit === "cover" ? Math.max : Math.min;
+        var scale = scaleBase(width / cropWidth, height / cropHeight) * headset.zoom;
+        imageWidth = cropWidth * scale;
+        imageHeight = cropHeight * scale;
+      }
       var offsetX = eyeSign * headset.eyeOffsetX / 100 * width;
       var offsetY = headset.eyeOffsetY / 100 * height;
       context.filter = "brightness(" + headset.brightness + ")";
@@ -315,8 +373,28 @@
       var frameHeight = height * headset.eyeHeight / 100;
       var gap = cellWidth * headset.eyeGap / 100;
       var y = (height - frameHeight) / 2;
-      drawEye(streamImage, settings.source, (cellWidth - frameWidth) / 2 - gap / 2, y, frameWidth, frameHeight, -1, headset);
-      drawEye(streamImage, settings.source, cellWidth + (cellWidth - frameWidth) / 2 + gap / 2, y, frameWidth, frameHeight, 1, headset);
+      drawEye(
+        streamImage,
+        settings.source,
+        (cellWidth - frameWidth) / 2 - gap / 2,
+        y,
+        frameWidth,
+        frameHeight,
+        -1,
+        headset,
+        settings.source.fit || "contain"
+      );
+      drawEye(
+        streamImage,
+        settings.source,
+        cellWidth + (cellWidth - frameWidth) / 2 + gap / 2,
+        y,
+        frameWidth,
+        frameHeight,
+        1,
+        headset,
+        settings.source.fit || "contain"
+      );
     }
 
     return { render: render };

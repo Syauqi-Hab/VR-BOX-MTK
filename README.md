@@ -18,9 +18,11 @@ landscape mode.
 - A desktop control interface at /studio with an OBS-like live preview.
 - Select the virtual desktop or a specific Windows monitor as the capture source.
 - One-click quality profiles plus live bitrate, frame age, monitor, and headset status.
+- Fixed stream-frame presets (`960x540`, `1280x720`, and `1600x900`) with
+  automatic black letterboxing instead of stretched output.
 - One shared settings model: changing a Studio slider updates the HP renderer.
 - Independent control for source crop, eye width/height, eye gap, offsets, zoom,
-  barrel distortion, curvature, and brightness.
+  barrel distortion, curvature, brightness, and fit mode.
 - Phone rendering through WebGL for two eye regions and lens distortion.
 - A Canvas fallback for phones/browsers without WebGL.
 - Persistent settings in lenscast-settings.json after the first run.
@@ -68,7 +70,7 @@ on Wi-Fi. It requires the usual Android USB debugging confirmation on the phone.
 
 1. Start LensCast before starting the game.
 2. For Persona 3 Reload, keep Mesin capture on Otomatis and use Game 30+
-   first: DXGI, 36 fps target, 0.50x resolution, and JPEG quality 58. The
+   first: DXGI, 36 fps target, `960x540` stream frame, and JPEG quality 58. The
    extra target headroom keeps measured FPS above 30 during Windows timing jitter.
 3. Choose the monitor containing the game from Monitor sumber when using more
    than one Windows display. Use Desktop virtual only when the whole desktop is needed.
@@ -76,6 +78,12 @@ on Wi-Fi. It requires the usual Android USB debugging confirmation on the phone.
 5. Adjust Lebar layar, Tinggi layar, and offsets until the visible area fits
    the lenses. Then tune barrel distortion and curvature in small steps.
 6. Use keyboard/mouse or a controller connected to the PC as usual.
+
+The stream frame only affects the image sent to the phone. To reduce the game's
+own GPU workload, set the game's own resolution to `1280x720` or `1600x900` in
+its graphics menu. Keep the game's aspect ratio at 16:9: LensCast duplicates that
+one image into both eyes and adds black bars automatically when the VR Box lens
+area is closer to a square.
 
 For the lowest practical latency, use a dedicated 5 GHz/6 GHz Wi-Fi connection
 with the PC wired to the router if possible. This transport is designed for a
@@ -91,6 +99,8 @@ on some Windows/GPU combinations.
 | Control | Result on HP |
 | --- | --- |
 | Potong desktop | Chooses which part of the PC screen is mirrored. |
+| Cara isi frame mata | `Pas` preserves the source with black bars; `Penuhi` crops; `Regang` changes aspect ratio. |
+| Ukuran frame | Sets the stable encoded stream frame without changing the game's render resolution. |
 | Lebar/Tinggi layar | Shrinks the active rectangle inside each physical half-screen. |
 | Jarak antar mata | Moves the active rectangles apart to match the lens centers. |
 | Offset horizontal | Moves the content outward or inward per eye. |

@@ -7,6 +7,7 @@ from app import (
     ViewerRegistry,
     crop_image_to_display,
     dxgi_output_index,
+    fit_image_to_stream,
     sanitize_settings,
 )
 
@@ -44,6 +45,25 @@ class SettingsValidationTests(unittest.TestCase):
         self.assertEqual(settings["capture"]["backend"], "dxgi")
         invalid = sanitize_settings({"capture": {"backend": "unknown"}})
         self.assertEqual(invalid["capture"]["backend"], "auto")
+
+    def test_stream_frame_and_fit_mode_are_sanitized(self):
+        settings = sanitize_settings(
+            {
+                "stream": {"width": 1279, "height": 721},
+                "source": {"fit": "cover"},
+            }
+        )
+        self.assertEqual(settings["stream"], {"width": 1278, "height": 720})
+        self.assertEqual(settings["source"]["fit"], "cover")
+        self.assertEqual(sanitize_settings({"source": {"fit": "invalid"}})["source"]["fit"], "contain")
+
+    def test_stream_letterboxes_without_cropping_or_stretching(self):
+        source = Image.new("RGB", (160, 90), "#ff0000")
+        frame = fit_image_to_stream(source, 100, 100)
+        self.assertEqual(frame.size, (100, 100))
+        self.assertEqual(frame.getpixel((50, 0)), (0, 0, 0))
+        self.assertEqual(frame.getpixel((50, 22)), (255, 0, 0))
+        self.assertEqual(frame.getpixel((50, 78)), (0, 0, 0))
 
     def test_crop_selected_monitor_uses_virtual_desktop_coordinates(self):
         image = Image.new("RGB", (200, 100), "#ff0000")
