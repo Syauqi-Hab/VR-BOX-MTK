@@ -1,0 +1,272 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#101818">
+  <title>LensCast Studio</title>
+  <link rel="stylesheet" href="/assets/app.css">
+</head>
+<body class="studio-page">
+  <div class="grain" aria-hidden="true"></div>
+  <header class="topbar">
+    <a class="brand" href="/studio" aria-label="LensCast Studio">
+      <span class="brand-mark"><i></i><i></i></span>
+      <span>LENSCAST <b>STUDIO</b></span>
+    </a>
+    <div class="topbar-status">
+      <span class="status-dot"></span>
+      <span id="streamState">MENGHUBUNGKAN CAPTURE</span>
+    </div>
+    <div class="topbar-actions">
+      <button class="quiet-button" id="resetButton" type="button">Reset kalibrasi</button>
+      <a class="phone-button" href="/phone" target="_blank" rel="noreferrer">Buka tampilan HP <span>-&gt;</span></a>
+    </div>
+  </header>
+
+  <main class="studio-layout">
+    <aside class="inspector-panel">
+      <div class="panel-heading">
+        <p class="eyebrow">INPUT</p>
+        <h1>Kontrol sumber</h1>
+        <p>Area desktop yang dikirim ke kedua lensa.</p>
+      </div>
+
+      <section class="control-section capture-target-section">
+        <div class="section-title">
+          <span>Monitor sumber</span>
+          <button class="text-button" id="refreshDisplaysButton" type="button">Segarkan</button>
+        </div>
+        <label class="select-control">
+          <span>Pilih layar PC</span>
+          <select id="displaySelect" data-path="capture.display" aria-label="Pilih monitor sumber">
+            <option value="all">Memuat monitor...</option>
+          </select>
+        </label>
+        <p class="control-note" id="displayMeta">Menunggu daftar monitor Windows.</p>
+        <label class="select-control">
+          <span>Mesin capture</span>
+          <select id="backendSelect" data-path="capture.backend" aria-label="Pilih mesin capture">
+            <option value="auto">Otomatis - DXGI bila tersedia</option>
+            <option value="dxgi">Paksa DXGI cepat</option>
+            <option value="pillow">Kompatibilitas Pillow</option>
+          </select>
+        </label>
+        <p class="control-note" id="backendMeta">Memeriksa mesin capture aktif.</p>
+      </section>
+
+      <section class="control-section">
+        <div class="section-title">
+          <span>Potong desktop</span>
+          <button class="text-button" data-preset="full" type="button">Penuh</button>
+        </div>
+        <label class="range-control">
+          <span>Posisi horizontal <output data-output="source.cropX"></output></span>
+          <input data-path="source.cropX" data-unit="%" type="range" min="0" max="95" step="1">
+        </label>
+        <label class="range-control">
+          <span>Posisi vertikal <output data-output="source.cropY"></output></span>
+          <input data-path="source.cropY" data-unit="%" type="range" min="0" max="95" step="1">
+        </label>
+        <label class="range-control">
+          <span>Lebar sumber <output data-output="source.cropWidth"></output></span>
+          <input data-path="source.cropWidth" data-unit="%" type="range" min="5" max="100" step="1">
+        </label>
+        <label class="range-control">
+          <span>Tinggi sumber <output data-output="source.cropHeight"></output></span>
+          <input data-path="source.cropHeight" data-unit="%" type="range" min="5" max="100" step="1">
+        </label>
+      </section>
+
+      <section class="control-section stream-section">
+        <div class="section-title">
+          <span>Kualitas stream</span>
+          <span class="micro-pill">MJPEG LOCAL</span>
+        </div>
+        <label class="range-control">
+          <span>Frame rate <output data-output="capture.fps"></output></span>
+          <input data-path="capture.fps" data-unit=" fps" type="range" min="5" max="60" step="1">
+        </label>
+        <label class="range-control">
+          <span>Kualitas JPEG <output data-output="capture.quality"></output></span>
+          <input data-path="capture.quality" data-unit="%" type="range" min="30" max="95" step="1">
+        </label>
+        <label class="range-control">
+          <span>Resolusi capture <output data-output="capture.scale"></output></span>
+          <input data-path="capture.scale" data-unit="x" data-decimals="2" type="range" min="0.25" max="1" step="0.01">
+        </label>
+        <label class="switch-control">
+          <span>
+            <b>Jeda capture</b>
+            <small>Hentikan pengiriman sementara.</small>
+          </span>
+          <input id="pauseCapture" data-path="capture.paused" type="checkbox">
+          <i aria-hidden="true"></i>
+        </label>
+      </section>
+
+      <section class="control-section profile-section">
+        <div class="section-title">
+          <span>Profil performa</span>
+          <span class="micro-pill">PC ENCODE</span>
+        </div>
+        <div class="preset-grid quality-presets">
+          <button class="preset-button active" data-quality-preset="latency" type="button">
+            <b>Game 30+</b><small>36 fps / stabil</small>
+          </button>
+          <button class="preset-button" data-quality-preset="balanced" type="button">
+            <b>Visual</b><small>30 fps / lebih tajam</small>
+          </button>
+          <button class="preset-button" data-quality-preset="clarity" type="button">
+            <b>Tajam</b><small>30 fps / detail</small>
+          </button>
+        </div>
+      </section>
+    </aside>
+
+    <section class="workspace-panel">
+      <div class="workspace-head">
+        <div>
+          <p class="eyebrow">LIVE COMPOSITOR</p>
+          <h2>Preview headset</h2>
+        </div>
+        <div class="workspace-actions">
+          <div class="view-toggle" aria-label="Mode preview">
+            <button class="active" data-preview-mode="output" type="button">Output VR</button>
+            <button data-preview-mode="source" type="button">Sumber</button>
+          </div>
+          <button class="preview-expand" id="fullscreenPreviewButton" type="button">Layar penuh</button>
+        </div>
+      </div>
+      <div class="preview-shell">
+        <canvas id="studioPreview" width="1600" height="800" aria-label="Preview hasil headset"></canvas>
+        <div class="preview-legend" id="previewLegend">
+          <span><i class="legend-left"></i>MATA KIRI</span>
+          <span><i class="legend-right"></i>MATA KANAN</span>
+          <span><i class="legend-crop"></i>AREA SUMBER</span>
+        </div>
+      </div>
+      <div class="workspace-foot">
+        <div class="readout">
+          <span>CAPTURE</span>
+          <b id="captureReadout">-- x -- / -- fps</b>
+        </div>
+        <div class="readout">
+          <span>TARGET</span>
+          <b id="captureTargetReadout">MENUNGGU MONITOR</b>
+        </div>
+        <div class="readout">
+          <span>STREAM</span>
+          <b id="streamReadout">-- Mbps / -- ms</b>
+        </div>
+        <div class="readout">
+          <span>ENGINE</span>
+          <b id="backendReadout">MEMERIKSA DXGI</b>
+        </div>
+        <div class="readout">
+          <span>HEADSET</span>
+          <b id="headsetReadout">0 HP TERHUBUNG</b>
+        </div>
+        <div class="readout">
+          <span>MODE</span>
+          <b id="renderReadout">DUAL EYE / LENS WARP</b>
+        </div>
+        <div class="preview-tip">Geser slider sambil melihat frame kuning di preview.</div>
+      </div>
+    </section>
+
+    <aside class="calibration-panel">
+      <div class="panel-heading">
+        <p class="eyebrow">HEADSET FIT</p>
+        <h2>Kalibrasi lensa</h2>
+        <p>Sesuaikan sampai bagian yang terlihat dari VR Box tepat berada di dalam frame.</p>
+      </div>
+
+      <section class="control-section calibration-presets">
+        <div class="section-title">
+          <span>Mulai dari preset</span>
+          <span class="micro-pill lime">FINE TUNE</span>
+        </div>
+        <div class="preset-grid headset-presets">
+          <button class="preset-button" data-headset-preset="wide" type="button">
+            <b>Lensa lebar</b><small>Ruang pandang besar</small>
+          </button>
+          <button class="preset-button active" data-headset-preset="balanced" type="button">
+            <b>Universal</b><small>VR Box umum</small>
+          </button>
+          <button class="preset-button" data-headset-preset="compact" type="button">
+            <b>VR Box rapat</b><small>Frame lebih kecil</small>
+          </button>
+        </div>
+      </section>
+
+      <section class="control-section">
+        <div class="section-title"><span>Ukuran area mata</span></div>
+        <label class="range-control">
+          <span>Lebar layar <output data-output="headset.eyeWidth"></output></span>
+          <input data-path="headset.eyeWidth" data-unit="%" type="range" min="45" max="100" step="1">
+        </label>
+        <label class="range-control">
+          <span>Tinggi layar <output data-output="headset.eyeHeight"></output></span>
+          <input data-path="headset.eyeHeight" data-unit="%" type="range" min="45" max="100" step="1">
+        </label>
+        <label class="range-control">
+          <span>Jarak antar mata <output data-output="headset.eyeGap"></output></span>
+          <input data-path="headset.eyeGap" data-unit="%" type="range" min="0" max="16" step="0.5">
+        </label>
+      </section>
+
+      <section class="control-section">
+        <div class="section-title"><span>Posisi gambar</span></div>
+        <label class="range-control">
+          <span>Offset horizontal <output data-output="headset.eyeOffsetX"></output></span>
+          <input data-path="headset.eyeOffsetX" data-unit="%" type="range" min="-20" max="20" step="0.5">
+        </label>
+        <label class="range-control">
+          <span>Offset vertikal <output data-output="headset.eyeOffsetY"></output></span>
+          <input data-path="headset.eyeOffsetY" data-unit="%" type="range" min="-20" max="20" step="0.5">
+        </label>
+        <label class="range-control">
+          <span>Zoom virtual <output data-output="headset.zoom"></output></span>
+          <input data-path="headset.zoom" data-unit="x" data-decimals="2" type="range" min="0.6" max="2.2" step="0.01">
+        </label>
+      </section>
+
+      <section class="control-section optics-section">
+        <div class="section-title"><span>Optik</span><span class="micro-pill lime">GPU DI HP</span></div>
+        <label class="range-control">
+          <span>Barrel distortion <output data-output="headset.barrel"></output></span>
+          <input data-path="headset.barrel" data-unit="" data-decimals="2" type="range" min="-0.35" max="0.5" step="0.01">
+        </label>
+        <label class="range-control">
+          <span>Kelengkungan <output data-output="headset.curvature"></output></span>
+          <input data-path="headset.curvature" data-unit="" data-decimals="2" type="range" min="-0.4" max="0.4" step="0.01">
+        </label>
+        <label class="range-control">
+          <span>Kecerahan <output data-output="headset.brightness"></output></span>
+          <input data-path="headset.brightness" data-unit="x" data-decimals="2" type="range" min="0.5" max="1.5" step="0.01">
+        </label>
+      </section>
+    </aside>
+  </main>
+
+  <section class="connection-dock">
+    <div class="connection-copy">
+      <p class="eyebrow">WI-FI LOKAL ATAU USB TETHER</p>
+      <h2>Hubungkan headset</h2>
+      <p>Buka alamat ini dari browser HP, putar HP ke landscape, lalu tekan "Masuk mode VR".</p>
+    </div>
+    <div class="phone-url">
+      <code id="phoneUrl">Mencari alamat jaringan...</code>
+      <button id="copyUrlButton" type="button">Salin</button>
+    </div>
+    <div class="connection-note">
+      <span class="status-dot"></span>
+      <span id="connectionStatus">Menunggu perangkat di jaringan lokal</span>
+    </div>
+  </section>
+
+  <img id="streamImage" alt="" aria-hidden="true">
+  <script src="/assets/studio.js"></script>
+</body>
+</html>

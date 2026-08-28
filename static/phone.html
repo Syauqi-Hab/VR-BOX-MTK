@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#000000">
+  <title>LensCast VR View</title>
+  <link rel="stylesheet" href="/assets/app.css">
+</head>
+<body class="phone-page">
+  <main class="vr-stage" id="vrStage">
+    <canvas id="vrCanvas" aria-label="Tampilan LensCast VR split screen"></canvas>
+    <img id="phoneStream" alt="" aria-hidden="true">
+    <div class="vr-divider" aria-hidden="true"></div>
+  </main>
+
+  <div class="phone-chrome" id="phoneChrome">
+    <div class="phone-brand"><i></i>LENSCAST VR</div>
+    <div class="chrome-actions">
+      <button id="tuneButton" type="button">Kalibrasi</button>
+      <button id="fullscreenButton" type="button">Layar penuh</button>
+    </div>
+  </div>
+
+  <div class="orientation-notice" id="orientationNotice">Putar HP ke landscape sebelum memasukkan ke VR Box.</div>
+
+  <section class="phone-onboarding" id="onboarding">
+    <div class="onboarding-card">
+      <p class="eyebrow">LENSCAST / PHONE VIEW</p>
+      <h1>Layar besar, sambil rebahan.</h1>
+      <p>Desktop PC sedang dikirim sebagai dua mata yang identik. Pengaturan di LensCast Studio akan muncul di sini secara langsung.</p>
+      <ol class="phone-checklist">
+        <li>Gunakan Wi-Fi yang sama dengan PC.</li>
+        <li>Putar HP ke posisi landscape.</li>
+        <li>Tekan tombol, lalu masukkan HP ke VR Box.</li>
+      </ol>
+      <button class="mobile-primary" id="enterVrButton" type="button">Masuk mode VR</button>
+      <div class="mobile-state" id="mobileState">Menghubungkan ke desktop...</div>
+    </div>
+  </section>
+
+  <section class="tune-sheet" id="tuneSheet" aria-label="Kalibrasi cepat">
+    <div class="tune-sheet-head">
+      <div>
+        <p class="eyebrow">QUICK TUNE</p>
+        <h2>Kalibrasi dari HP</h2>
+      </div>
+      <button id="closeTuneButton" type="button">Tutup</button>
+    </div>
+    <div class="mobile-controls">
+      <label class="range-control">
+        <span>Lebar mata <output data-output="headset.eyeWidth"></output></span>
+        <input data-path="headset.eyeWidth" data-unit="%" type="range" min="45" max="100" step="1">
+      </label>
+      <label class="range-control">
+        <span>Tinggi mata <output data-output="headset.eyeHeight"></output></span>
+        <input data-path="headset.eyeHeight" data-unit="%" type="range" min="45" max="100" step="1">
+      </label>
+      <label class="range-control">
+        <span>Offset horizontal <output data-output="headset.eyeOffsetX"></output></span>
+        <input data-path="headset.eyeOffsetX" data-unit="%" type="range" min="-20" max="20" step="0.5">
+      </label>
+      <label class="range-control">
+        <span>Offset vertikal <output data-output="headset.eyeOffsetY"></output></span>
+        <input data-path="headset.eyeOffsetY" data-unit="%" type="range" min="-20" max="20" step="0.5">
+      </label>
+      <label class="range-control">
+        <span>Zoom <output data-output="headset.zoom"></output></span>
+        <input data-path="headset.zoom" data-unit="x" data-decimals="2" type="range" min="0.6" max="2.2" step="0.01">
+      </label>
+      <label class="range-control">
+        <span>Barrel <output data-output="headset.barrel"></output></span>
+        <input data-path="headset.barrel" data-unit="" data-decimals="2" type="range" min="-0.35" max="0.5" step="0.01">
+      </label>
+      <label class="range-control">
+        <span>Kelengkungan <output data-output="headset.curvature"></output></span>
+        <input data-path="headset.curvature" data-unit="" data-decimals="2" type="range" min="-0.4" max="0.4" step="0.01">
+      </label>
+      <label class="range-control">
+        <span>Kecerahan <output data-output="headset.brightness"></output></span>
+        <input data-path="headset.brightness" data-unit="x" data-decimals="2" type="range" min="0.5" max="1.5" step="0.01">
+      </label>
+    </div>
+  </section>
+
+  <script src="/assets/mobile.js"></script>
+</body>
+</html>

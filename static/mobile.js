@@ -1,0 +1,444 @@
+(function () {
+  "use strict";
+
+  var settings = null;
+  var renderer = null;
+  var saveTimer = null;
+  var retryTimer = null;
+  var pollingTimer = null;
+  var lastLocalChange = 0;
+  var wakeLock = null;
+
+  var canvas = document.getElementById("vrCanvas");
+  var streamImage = document.getElementById("phoneStream");
+  var onboarding = document.getElementById("onboarding");
+  var chrome = document.getElementById("phoneChrome");
+  var tuneSheet = document.getElementById("tuneSheet");
+  var stateLabel = document.getElementById("mobileState");
+  var orientationNotice = document.getElementById("orientationNotice");
+  var controls = Array.prototype.slice.call(document.querySelectorAll("[data-path]"));
+  var outputNodes = Array.prototype.slice.call(document.querySelectorAll("[data-output]"));
+
+  var vertexShaderSource = [
+    "attribute vec2 aPosition;",
+    "varying vec2 vUv;",
+    "void main() {",
+    "  vUv = aPosition * 0.5 + 0.5;",
+    "  gl_Position = vec4(aPosition, 0.0, 1.0);",
+    "}"
+  ].join("\n");
+
+  var fragmentShaderSource = [
+    "precision highp float;",
+    "uniform sampler2D uTexture;",
+    "uniform vec4 uCrop;",
+    "uniform vec2 uFrame;",
+    "uniform float uGap;",
+    "uniform vec2 uOffset;",
+    "uniform float uZoom;",
+    "uniform float uBarrel;",
+    "uniform float uCurvature;",
+    "uniform float uBrightness;",
+    "varying vec2 vUv;",
+    "void main() {",
+    "  float eyeIndex = floor(vUv.x * 2.0);",
+    "  float eyeSign = eyeIndex < 0.5 ? -1.0 : 1.0;",
+    "  vec2 eyeUv = vec2(fract(vUv.x * 2.0), vUv.y);",
+    "  vec2 center = vec2(0.5 + eyeSign * uGap * 0.5, 0.5);",
+    "  vec2 point = (eyeUv - center) / uFrame;",
+    "  if (abs(point.x) > 0.5 || abs(point.y) > 0.5) {",
+    "    gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0);",
+    "    return;",
+    "  }",
+    "  point.x -= eyeSign * uOffset.x;",
+    "  point.y -= uOffset.y;",
+    "  point /= uZoom;",
+    "  float radiusSquared = dot(point, point);",
+    "  point *= 1.0 + uBarrel * radiusSquared;",
+    "  point.x *= 1.0 - uCurvature * 4.0 * point.x * point.x;",
+    "  if (abs(point.x) > 0.5 || abs(point.y) > 0.5) {",
+    "    gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0);",
+    "    return;",
+    "  }",
+    "  vec2 sourceUv = uCrop.xy + (point + 0.5) * uCrop.zw;",
+    "  vec3 color = texture2D(uTexture, sourceUv).rgb * uBrightness;",
+    "  gl_FragColor = vec4(color, 1.0);",
+    "}"
+  ].join("\n");
+
+  function getPath(target, path) {
+    var parts = path.split(".");
+    return target[parts[0]][parts[1]];
+  }
+
+  function setPath(target, path, value) {
+    var parts = path.split(".");
+    target[parts[0]][parts[1]] = value;
+  }
+
+  function requestJson(url, options) {
+    return fetch(url, options).then(function (response) {
+      if (!response.ok) {
+        throw new Error("HTTP " + response.status);
+      }
+      return response.json();
+    });
+  }
+
+  function numberFormat(value, control) {
+    var decimals = Number(control.dataset.decimals || 0);
+    return Number(value).toFixed(decimals) + (control.dataset.unit || "");
+  }
+
+  function rangeFill(control) {
+    var minimum = Number(control.min);
+    var maximum = Number(control.max);
+    var fill = (Number(control.value) - minimum) / (maximum - minimum) * 100;
+    control.style.setProperty("--fill", String(fill) + "%");
+  }
+
+  function refreshControls() {
+    if (!settings) {
+      return;
+    }
+    controls.forEach(function (control) {
+      var value = getPath(settings, control.dataset.path);
+      control.value = value;
+      rangeFill(control);
+    });
+    outputNodes.forEach(function (output) {
+      var control = document.querySelector("[data-path='" + output.dataset.output + "']");
+      output.textContent = numberFormat(getPath(settings, output.dataset.output), control);
+    });
+  }
+
+  function queueSave() {
+    window.clearTimeout(saveTimer);
+    saveTimer = window.setTimeout(function () {
+      requestJson("/api/settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(settings)
+      }).then(function (serverSettings) {
+        settings = serverSettings;
+        refreshControls();
+      })["catch"](function () {
+        stateLabel.textContent = "Pengaturan belum sampai ke PC";
+      });
+    }, 160);
+  }
+
+  controls.forEach(function (control) {
+    control.addEventListener("input", function () {
+      if (!settings) {
+        return;
+      }
+      setPath(settings, control.dataset.path, Number(control.value));
+      lastLocalChange = Date.now();
+      refreshControls();
+      queueSave();
+    });
+  });
+
+  function compileShader(gl, type, source) {
+    var shader = gl.createShader(type);
+    gl.shaderSource(shader, source);
+    gl.compileShader(shader);
+    if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+      throw new Error(gl.getShaderInfoLog(shader) || "Shader compile failed");
+    }
+    return shader;
+  }
+
+  function createWebGlRenderer() {
+    var gl = canvas.getContext("webgl", {
+      alpha: false,
+      antialias: false,
+      powerPreference: "high-performance"
+    });
+    if (!gl) {
+      return null;
+    }
+
+    try {
+      var program = gl.createProgram();
+      gl.attachShader(program, compileShader(gl, gl.VERTEX_SHADER, vertexShaderSource));
+      gl.attachShader(program, compileShader(gl, gl.FRAGMENT_SHADER, fragmentShaderSource));
+      gl.linkProgram(program);
+      if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+        throw new Error(gl.getProgramInfoLog(program) || "Shader link failed");
+      }
+
+      var buffer = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+      gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([
+        -1, -1, 1, -1, -1, 1,
+        -1, 1, 1, -1, 1, 1
+      ]), gl.STATIC_DRAW);
+
+      var texture = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D, texture);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      gl.texImage2D(
+        gl.TEXTURE_2D,
+        0,
+        gl.RGBA,
+        1,
+        1,
+        0,
+        gl.RGBA,
+        gl.UNSIGNED_BYTE,
+        new Uint8Array([0, 0, 0, 255])
+      );
+
+      var position = gl.getAttribLocation(program, "aPosition");
+      var uniforms = {
+        texture: gl.getUniformLocation(program, "uTexture"),
+        crop: gl.getUniformLocation(program, "uCrop"),
+        frame: gl.getUniformLocation(program, "uFrame"),
+        gap: gl.getUniformLocation(program, "uGap"),
+        offset: gl.getUniformLocation(program, "uOffset"),
+        zoom: gl.getUniformLocation(program, "uZoom"),
+        barrel: gl.getUniformLocation(program, "uBarrel"),
+        curvature: gl.getUniformLocation(program, "uCurvature"),
+        brightness: gl.getUniformLocation(program, "uBrightness")
+      };
+
+      function resize() {
+        var ratio = Math.min(window.devicePixelRatio || 1, 2);
+        var width = Math.max(1, Math.floor(window.innerWidth * ratio));
+        var height = Math.max(1, Math.floor(window.innerHeight * ratio));
+        if (canvas.width !== width || canvas.height !== height) {
+          canvas.width = width;
+          canvas.height = height;
+        }
+        gl.viewport(0, 0, canvas.width, canvas.height);
+      }
+
+      function render() {
+        resize();
+        gl.useProgram(program);
+        gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+        gl.enableVertexAttribArray(position);
+        gl.vertexAttribPointer(position, 2, gl.FLOAT, false, 0, 0);
+        gl.activeTexture(gl.TEXTURE0);
+        gl.bindTexture(gl.TEXTURE_2D, texture);
+        if (streamImage.naturalWidth > 0) {
+          try {
+            gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+            gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, streamImage);
+          } catch (error) {
+            // Browsers can reject a frame while the MJPEG image is being replaced.
+          }
+        }
+        var source = settings ? settings.source : { cropX: 0, cropY: 0, cropWidth: 100, cropHeight: 100 };
+        var headset = settings ? settings.headset : {
+          eyeWidth: 92, eyeHeight: 90, eyeGap: 2, eyeOffsetX: 0, eyeOffsetY: 0,
+          zoom: 1, barrel: 0.12, curvature: 0.08, brightness: 1
+        };
+        gl.uniform1i(uniforms.texture, 0);
+        gl.uniform4f(
+          uniforms.crop,
+          source.cropX / 100,
+          source.cropY / 100,
+          source.cropWidth / 100,
+          source.cropHeight / 100
+        );
+        gl.uniform2f(uniforms.frame, headset.eyeWidth / 100, headset.eyeHeight / 100);
+        gl.uniform1f(uniforms.gap, headset.eyeGap / 100);
+        gl.uniform2f(uniforms.offset, headset.eyeOffsetX / 100, headset.eyeOffsetY / 100);
+        gl.uniform1f(uniforms.zoom, headset.zoom);
+        gl.uniform1f(uniforms.barrel, headset.barrel);
+        gl.uniform1f(uniforms.curvature, headset.curvature);
+        gl.uniform1f(uniforms.brightness, headset.brightness);
+        gl.drawArrays(gl.TRIANGLES, 0, 6);
+      }
+
+      return { render: render };
+    } catch (error) {
+      console.warn("WebGL renderer unavailable", error);
+      return null;
+    }
+  }
+
+  function createCanvasFallback() {
+    var context = canvas.getContext("2d");
+
+    function drawEye(image, crop, x, y, width, height, eyeSign, headset) {
+      context.save();
+      context.beginPath();
+      context.rect(x, y, width, height);
+      context.clip();
+      var cropWidth = image.naturalWidth * crop.cropWidth / 100;
+      var cropHeight = image.naturalHeight * crop.cropHeight / 100;
+      var cropX = image.naturalWidth * crop.cropX / 100;
+      var cropY = image.naturalHeight * crop.cropY / 100;
+      var scale = Math.max(width / cropWidth, height / cropHeight) * headset.zoom;
+      var imageWidth = cropWidth * scale;
+      var imageHeight = cropHeight * scale;
+      var offsetX = eyeSign * headset.eyeOffsetX / 100 * width;
+      var offsetY = headset.eyeOffsetY / 100 * height;
+      context.filter = "brightness(" + headset.brightness + ")";
+      context.drawImage(
+        image,
+        cropX,
+        cropY,
+        cropWidth,
+        cropHeight,
+        x + (width - imageWidth) / 2 + offsetX,
+        y + (height - imageHeight) / 2 + offsetY,
+        imageWidth,
+        imageHeight
+      );
+      context.restore();
+    }
+
+    function render() {
+      var ratio = Math.min(window.devicePixelRatio || 1, 2);
+      var width = Math.max(1, Math.floor(window.innerWidth * ratio));
+      var height = Math.max(1, Math.floor(window.innerHeight * ratio));
+      if (canvas.width !== width || canvas.height !== height) {
+        canvas.width = width;
+        canvas.height = height;
+      }
+      context.fillStyle = "#000";
+      context.fillRect(0, 0, width, height);
+      if (!streamImage.naturalWidth || !settings) {
+        return;
+      }
+      var headset = settings.headset;
+      var cellWidth = width / 2;
+      var frameWidth = cellWidth * headset.eyeWidth / 100;
+      var frameHeight = height * headset.eyeHeight / 100;
+      var gap = cellWidth * headset.eyeGap / 100;
+      var y = (height - frameHeight) / 2;
+      drawEye(streamImage, settings.source, (cellWidth - frameWidth) / 2 - gap / 2, y, frameWidth, frameHeight, -1, headset);
+      drawEye(streamImage, settings.source, cellWidth + (cellWidth - frameWidth) / 2 + gap / 2, y, frameWidth, frameHeight, 1, headset);
+    }
+
+    return { render: render };
+  }
+
+  function requestFullscreen() {
+    var target = document.documentElement;
+    if (target.requestFullscreen) {
+      target.requestFullscreen()["catch"](function () {});
+    }
+    if (screen.orientation && screen.orientation.lock) {
+      screen.orientation.lock("landscape")["catch"](function () {});
+    }
+    if (navigator.wakeLock && navigator.wakeLock.request) {
+      navigator.wakeLock.request("screen").then(function (lock) {
+        wakeLock = lock;
+      })["catch"](function () {});
+    }
+  }
+
+  function enterVr() {
+    onboarding.classList.add("dismissed");
+    requestFullscreen();
+    chrome.classList.remove("hidden");
+    window.setTimeout(function () {
+      if (!tuneSheet.classList.contains("open")) {
+        chrome.classList.add("hidden");
+      }
+    }, 2600);
+  }
+
+  function setTuneOpen(open) {
+    tuneSheet.classList.toggle("open", open);
+    chrome.classList.toggle("hidden", !open);
+  }
+
+  document.getElementById("enterVrButton").addEventListener("click", enterVr);
+  document.getElementById("fullscreenButton").addEventListener("click", requestFullscreen);
+  document.getElementById("tuneButton").addEventListener("click", function () {
+    setTuneOpen(true);
+  });
+  document.getElementById("closeTuneButton").addEventListener("click", function () {
+    setTuneOpen(false);
+  });
+
+  document.getElementById("vrStage").addEventListener("click", function () {
+    if (!onboarding.classList.contains("dismissed") || tuneSheet.classList.contains("open")) {
+      return;
+    }
+    chrome.classList.toggle("hidden");
+  });
+
+  function updateOrientationNotice() {
+    orientationNotice.classList.toggle("hidden", window.innerWidth > window.innerHeight);
+  }
+
+  function updateMobileStatus() {
+    requestJson("/api/status").then(function (status) {
+      if (status.capture.error) {
+        stateLabel.textContent = "Capture PC error: " + status.capture.error;
+      } else if (status.capture.sequence > 0) {
+        stateLabel.textContent = "Desktop live - " + status.capture.measuredFps + " fps";
+      } else {
+        stateLabel.textContent = "Menunggu capture desktop...";
+      }
+    })["catch"](function () {
+      stateLabel.textContent = "Tidak dapat menjangkau PC. Cek Wi-Fi.";
+    });
+  }
+
+  function pollSettings() {
+    requestJson("/api/settings").then(function (serverSettings) {
+      if (Date.now() - lastLocalChange > 900) {
+        settings = serverSettings;
+        refreshControls();
+      }
+    })["catch"](function () {});
+  }
+
+  function startStream() {
+    streamImage.onload = function () {
+      updateMobileStatus();
+      window.clearTimeout(retryTimer);
+    };
+    streamImage.onerror = function () {
+      stateLabel.textContent = "Stream terputus, mencoba lagi...";
+      window.clearTimeout(retryTimer);
+      retryTimer = window.setTimeout(startStream, 1200);
+    };
+    streamImage.src = "/stream.mjpg?role=phone&start=" + Date.now();
+  }
+
+  function loop() {
+    renderer.render();
+    window.requestAnimationFrame(loop);
+  }
+
+  function boot() {
+    renderer = createWebGlRenderer() || createCanvasFallback();
+    requestJson("/api/settings").then(function (initialSettings) {
+      settings = initialSettings;
+      refreshControls();
+      updateMobileStatus();
+    })["catch"](function () {
+      stateLabel.textContent = "Tidak dapat memuat konfigurasi dari PC";
+    });
+    startStream();
+    pollingTimer = window.setInterval(pollSettings, 1000);
+    window.addEventListener("resize", updateOrientationNotice);
+    window.addEventListener("orientationchange", updateOrientationNotice);
+    updateOrientationNotice();
+    loop();
+  }
+
+  window.addEventListener("beforeunload", function () {
+    window.clearTimeout(saveTimer);
+    window.clearTimeout(retryTimer);
+    window.clearInterval(pollingTimer);
+    if (wakeLock) {
+      wakeLock.release()["catch"](function () {});
+    }
+  });
+
+  boot();
+}());
