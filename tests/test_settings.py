@@ -1,5 +1,7 @@
+import io
 import unittest
 
+import numpy as np
 from PIL import Image
 
 from app import (
@@ -7,6 +9,7 @@ from app import (
     ViewerRegistry,
     crop_image_to_display,
     dxgi_output_index,
+    encode_stream_frame,
     fit_image_to_stream,
     sanitize_settings,
 )
@@ -64,6 +67,26 @@ class SettingsValidationTests(unittest.TestCase):
         self.assertEqual(frame.getpixel((50, 0)), (0, 0, 0))
         self.assertEqual(frame.getpixel((50, 22)), (255, 0, 0))
         self.assertEqual(frame.getpixel((50, 78)), (0, 0, 0))
+
+    def test_stream_uses_exact_integer_downscale_dimensions(self):
+        source = Image.new("RGB", (1920, 1080), "#446688")
+        frame = fit_image_to_stream(source, 960, 540)
+        self.assertEqual(frame.size, (960, 540))
+        self.assertEqual(frame.getpixel((480, 270)), (68, 102, 136))
+
+    def test_stream_accepts_raw_dxgi_rgb_frames(self):
+        source = np.full((1080, 1920, 3), (68, 102, 136), dtype=np.uint8)
+        frame = fit_image_to_stream(source, 1280, 720)
+        self.assertEqual(frame.size, (1280, 720))
+        self.assertEqual(frame.getpixel((640, 360)), (68, 102, 136))
+
+    def test_raw_dxgi_jpeg_encoder_keeps_rgb_channel_order(self):
+        source = np.zeros((64, 128, 3), dtype=np.uint8)
+        source[:, :64] = (255, 0, 0)
+        source[:, 64:] = (0, 0, 255)
+        decoded = Image.open(io.BytesIO(encode_stream_frame(source, 95))).convert("RGB")
+        self.assertGreater(decoded.getpixel((20, 32))[0], 200)
+        self.assertGreater(decoded.getpixel((100, 32))[2], 200)
 
     def test_crop_selected_monitor_uses_virtual_desktop_coordinates(self):
         image = Image.new("RGB", (200, 100), "#ff0000")

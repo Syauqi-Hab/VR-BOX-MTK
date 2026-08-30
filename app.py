@@ -34,6 +34,13 @@ try:
 except ImportError:
     dxcam = None
 
+try:
+    import cv2
+    import numpy as np
+except ImportError:
+    cv2 = None
+    np = None
+
 
 APP_DIR = Path(__file__).resolve().parent
 STATIC_DIR = APP_DIR / "static"
@@ -42,6 +49,11 @@ BOUNDARY = "lenscast-frame"
 DISPLAY_ID_PATTERN = re.compile(r"^\\\\\.\\DISPLAY\d+$", re.IGNORECASE)
 CAPTURE_BACKENDS = {"auto", "dxgi", "pillow"}
 SOURCE_FIT_MODES = {"contain", "cover", "stretch"}
+HAS_OPENCV = cv2 is not None and np is not None
+
+if HAS_OPENCV:
+    # Four workers keep resize fast without briefly taking every CPU core from a game.
+    cv2.setNumThreads(min(4, max(1, (os.cpu_count() or 1) // 2)))
 
 DEFAULT_SETTINGS: dict[str, dict[str, Any]] = {
     "capture": {
@@ -228,18 +240,53 @@ def placeholder_frame(message: str = "Preparing desktop capture") -> tuple[bytes
     return buffer.getvalue(), width, height
 
 
-def fit_image_to_stream(image: Image.Image, width: int, height: int) -> Image.Image:
+def is_raw_dxgi_frame(image: Any) -> bool:
+    return HAS_OPENCV and isinstance(image, np.ndarray)
+
+
+def fit_image_to_stream(
+    image: Image.Image | Any,
+    width: int,
+    height: int,
+    preserve_raw: bool = False,
+) -> Image.Image | Any:
     """Resize to a stable stream frame without cropping or stretching the source."""
-    if image.width < 1 or image.height < 1:
+    raw_dxgi_frame = is_raw_dxgi_frame(image)
+    if raw_dxgi_frame:
+        source_height, source_width = image.shape[:2]
+    else:
+        source_width, source_height = image.size
+    if source_width < 1 or source_height < 1:
         raise RuntimeError("Capture returned an empty image.")
 
-    scale = min(width / image.width, height / image.height)
+    scale = min(width / source_width, height / source_height)
     resized_size = (
-        max(1, round(image.width * scale)),
-        max(1, round(image.height * scale)),
+        max(1, round(source_width * scale)),
+        max(1, round(source_height * scale)),
     )
-    if image.size != resized_size:
-        image = image.resize(resized_size, Image.Resampling.BILINEAR)
+    if raw_dxgi_frame:
+        downscaling = resized_size[0] <= source_width and resized_size[1] <= source_height
+        interpolation = cv2.INTER_AREA if downscaling else cv2.INTER_LINEAR
+        if (source_width, source_height) != resized_size:
+            image = cv2.resize(image, resized_size, interpolation=interpolation)
+        if preserve_raw and resized_size == (width, height) and image.ndim == 3 and image.shape[2] == 3:
+            return image
+        image = Image.fromarray(image)
+    elif image.size != resized_size:
+        horizontal_factor, horizontal_remainder = divmod(image.width, resized_size[0])
+        vertical_factor, vertical_remainder = divmod(image.height, resized_size[1])
+        if (
+            horizontal_factor > 1
+            and horizontal_factor == vertical_factor
+            and horizontal_remainder == 0
+            and vertical_remainder == 0
+        ):
+            # Image.reduce uses Pillow's optimized box filter for exact integer downscales.
+            image = image.reduce(horizontal_factor)
+        else:
+            downscaling = resized_size[0] <= image.width and resized_size[1] <= image.height
+            resample = Image.Resampling.BOX if downscaling else Image.Resampling.BILINEAR
+            image = image.resize(resized_size, resample)
     if image.mode != "RGB":
         image = image.convert("RGB")
 
@@ -249,6 +296,31 @@ def fit_image_to_stream(image: Image.Image, width: int, height: int) -> Image.Im
     frame = Image.new("RGB", (width, height), "black")
     frame.paste(image, ((width - image.width) // 2, (height - image.height) // 2))
     return frame
+
+
+def encode_stream_frame(image: Image.Image | Any, quality: int) -> bytes:
+    """Encode raw DXGI RGB with OpenCV, retaining Pillow for every fallback path."""
+    if is_raw_dxgi_frame(image):
+        if image.ndim == 3 and image.shape[2] == 3:
+            bgr_image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
+            success, encoded = cv2.imencode(
+                ".jpg",
+                bgr_image,
+                [cv2.IMWRITE_JPEG_QUALITY, quality],
+            )
+            if success:
+                return encoded.tobytes()
+        image = Image.fromarray(image)
+
+    buffer = io.BytesIO()
+    image.save(
+        buffer,
+        format="JPEG",
+        quality=quality,
+        optimize=False,
+        subsampling=2,
+    )
+    return buffer.getvalue()
 
 
 def configure_dpi_awareness() -> None:
@@ -460,7 +532,7 @@ class DxgiDesktopCapture:
         self,
         selected_display: dict[str, Any],
         displays: list[dict[str, Any]],
-    ) -> Image.Image:
+    ) -> Image.Image | Any:
         if dxcam is None:
             raise RuntimeError("dxcam is not installed.")
         output_index = dxgi_output_index(selected_display, displays)
@@ -482,7 +554,7 @@ class DxgiDesktopCapture:
             frame = self._camera.grab(new_frame_only=False, copy=False)
             if frame is None:
                 raise RuntimeError("DXGI did not return a desktop frame.")
-            return Image.fromarray(frame)
+            return frame if HAS_OPENCV else Image.fromarray(frame)
         except Exception:
             self.close()
             raise
@@ -657,6 +729,16 @@ class DesktopCapture:
         self._fps_window_started = time.monotonic()
         self._measured_fps = 0.0
         self._bitrate_mbps = 0.0
+        self._target_fps = DEFAULT_SETTINGS["capture"]["fps"]
+        self._timing_frames = 0
+        self._capture_ms_total = 0.0
+        self._resize_ms_total = 0.0
+        self._encode_ms_total = 0.0
+        self._pipeline_ms_total = 0.0
+        self._capture_ms = 0.0
+        self._resize_ms = 0.0
+        self._encode_ms = 0.0
+        self._pipeline_ms = 0.0
         self._target_id = "all"
         self._target_label = "Desktop virtual / semua monitor"
         self._target_available = True
@@ -689,8 +771,15 @@ class DesktopCapture:
                 "height": frame.height,
                 "ageMs": round((time.monotonic() - frame.captured_at) * 1000),
                 "measuredFps": round(self._measured_fps, 1),
+                "targetFps": self._target_fps,
                 "bitrateMbps": round(self._bitrate_mbps, 2),
                 "frameBytes": len(frame.jpeg),
+                "timings": {
+                    "captureMs": round(self._capture_ms, 1),
+                    "resizeMs": round(self._resize_ms, 1),
+                    "encodeMs": round(self._encode_ms, 1),
+                    "pipelineMs": round(self._pipeline_ms, 1),
+                },
                 "target": {
                     "id": self._target_id,
                     "label": self._target_label,
@@ -759,6 +848,7 @@ class DesktopCapture:
                 continue
 
             try:
+                frame_started_at = time.perf_counter()
                 (
                     image,
                     selected_display,
@@ -766,26 +856,36 @@ class DesktopCapture:
                     active_backend,
                     backend_detail,
                 ) = self._capture_image(capture_settings)
+                capture_finished_at = time.perf_counter()
+                raw_dxgi_frame = is_raw_dxgi_frame(image)
                 image = fit_image_to_stream(
                     image,
                     stream_settings["width"],
                     stream_settings["height"],
+                    preserve_raw=raw_dxgi_frame,
                 )
-                buffer = io.BytesIO()
-                image.save(
-                    buffer,
-                    format="JPEG",
-                    quality=capture_settings["quality"],
-                    optimize=False,
-                )
-                encoded_frame = buffer.getvalue()
+                resize_finished_at = time.perf_counter()
+                if is_raw_dxgi_frame(image):
+                    backend_detail += " OpenCV SIMD resize dan JPEG aktif."
+                elif raw_dxgi_frame:
+                    backend_detail += " OpenCV SIMD resize aktif; Pillow JPEG dipakai untuk letterbox."
+                encoded_frame = encode_stream_frame(image, capture_settings["quality"])
+                encode_finished_at = time.perf_counter()
                 now = time.monotonic()
+                capture_ms = (capture_finished_at - frame_started_at) * 1000
+                resize_ms = (resize_finished_at - capture_finished_at) * 1000
+                encode_ms = (encode_finished_at - resize_finished_at) * 1000
+                pipeline_ms = (encode_finished_at - frame_started_at) * 1000
+                if is_raw_dxgi_frame(image):
+                    image_height, image_width = image.shape[:2]
+                else:
+                    image_width, image_height = image.size
                 with self._condition:
                     self._frame = Frame(
                         self._frame.sequence + 1,
                         encoded_frame,
-                        image.width,
-                        image.height,
+                        image_width,
+                        image_height,
                         now,
                     )
                     self._error = ""
@@ -797,12 +897,28 @@ class DesktopCapture:
                     self._backend_detail = backend_detail
                     self._captured_frames += 1
                     self._encoded_bytes += len(encoded_frame)
+                    self._target_fps = capture_settings["fps"]
+                    self._timing_frames += 1
+                    self._capture_ms_total += capture_ms
+                    self._resize_ms_total += resize_ms
+                    self._encode_ms_total += encode_ms
+                    self._pipeline_ms_total += pipeline_ms
                     elapsed = now - self._fps_window_started
                     if elapsed >= 1.0:
                         self._measured_fps = self._captured_frames / elapsed
                         self._bitrate_mbps = self._encoded_bytes * 8 / elapsed / 1_000_000
+                        timing_frames = max(1, self._timing_frames)
+                        self._capture_ms = self._capture_ms_total / timing_frames
+                        self._resize_ms = self._resize_ms_total / timing_frames
+                        self._encode_ms = self._encode_ms_total / timing_frames
+                        self._pipeline_ms = self._pipeline_ms_total / timing_frames
                         self._captured_frames = 0
                         self._encoded_bytes = 0
+                        self._timing_frames = 0
+                        self._capture_ms_total = 0.0
+                        self._resize_ms_total = 0.0
+                        self._encode_ms_total = 0.0
+                        self._pipeline_ms_total = 0.0
                         self._fps_window_started = now
                     self._condition.notify_all()
             except Exception as error:  # ImageGrab errors should not kill the server.
@@ -998,6 +1114,13 @@ class LensCastRequestHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def _serve_mjpeg(self, query: str) -> None:
+        try:
+            # Keep a slow Wi-Fi reader close to the newest frame instead of accumulating seconds of JPEGs.
+            self.connection.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+            self.connection.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 256 * 1024)
+            self.connection.settimeout(2.0)
+        except OSError:
+            pass
         self.send_response(HTTPStatus.OK)
         self.send_header("Content-Type", f"multipart/x-mixed-replace; boundary={BOUNDARY}")
         self.send_header("Cache-Control", "no-store, no-cache, must-revalidate")
@@ -1012,13 +1135,18 @@ class LensCastRequestHandler(BaseHTTPRequestHandler):
             while True:
                 frame = self.server.capture.get_after(sequence)
                 sequence = frame.sequence
-                self.wfile.write(f"--{BOUNDARY}\r\n".encode("ascii"))
-                self.wfile.write(b"Content-Type: image/jpeg\r\n")
-                self.wfile.write(f"Content-Length: {len(frame.jpeg)}\r\n\r\n".encode("ascii"))
-                self.wfile.write(frame.jpeg)
-                self.wfile.write(b"\r\n")
+                part = b"".join(
+                    (
+                        f"--{BOUNDARY}\r\n".encode("ascii"),
+                        b"Content-Type: image/jpeg\r\n",
+                        f"Content-Length: {len(frame.jpeg)}\r\n\r\n".encode("ascii"),
+                        frame.jpeg,
+                        b"\r\n",
+                    )
+                )
+                self.wfile.write(part)
                 self.wfile.flush()
-        except (BrokenPipeError, ConnectionResetError, TimeoutError):
+        except OSError:
             pass
         finally:
             self.server.viewers.disconnect(viewer_role)

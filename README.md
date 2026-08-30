@@ -15,6 +15,8 @@ landscape mode.
 - Live Windows desktop capture with a dependency-light Pillow/GDI fallback.
 - Automatic DXGI Desktop Duplication capture for the 30 fps game profile, with
   Pillow/GDI fallback when DXGI is unavailable.
+- OpenCV SIMD scaling on raw DXGI frames, with a four-worker cap so resize does
+  not monopolize CPU cores needed by the game.
 - A desktop control interface at /studio with an OBS-like live preview.
 - Select the virtual desktop or a specific Windows monitor as the capture source.
 - One-click quality profiles plus live bitrate, frame age, monitor, and headset status.
@@ -33,7 +35,8 @@ Double-click [Start LensCast.bat](<C:/Abie/Passion Project/VR/Start LensCast.bat
 
 ~~~powershell
 cd "C:\Abie\Passion Project\VR"
-py app.py
+py -3.12 -m pip install -r requirements.txt
+py -3.12 app.py
 ~~~
 
 The Studio page opens automatically. If it does not, use:
@@ -72,6 +75,9 @@ on Wi-Fi. It requires the usual Android USB debugging confirmation on the phone.
 2. For Persona 3 Reload, keep Mesin capture on Otomatis and use Game 30+
    first: DXGI, 36 fps target, `960x540` stream frame, and JPEG quality 58. The
    extra target headroom keeps measured FPS above 30 during Windows timing jitter.
+   The capture note should say `DXGI Desktop Duplication aktif` and `OpenCV SIMD`.
+   If it says Pillow instead, start LensCast through `Start LensCast.bat` so the
+   Python 3.12 environment with the optimized dependencies is used.
 3. Choose the monitor containing the game from Monitor sumber when using more
    than one Windows display. Use Desktop virtual only when the whole desktop is needed.
 4. Open the phone URL and put it in the VR Box.
@@ -89,6 +95,10 @@ For the lowest practical latency, use a dedicated 5 GHz/6 GHz Wi-Fi connection
 with the PC wired to the router if possible. This transport is designed for a
 virtual cinema view, so a regular game is shown identically to both eyes; it does
 not add true 3D depth or headset tracking.
+
+Once the `CAPTURE` readout stays at its target, raise Frame rate toward 60 before
+raising stream resolution. Use `960x540` when Wi-Fi is the limit, then try
+`1280x720`; `1600x900` can require much more bandwidth in detailed game scenes.
 
 Use Borderless Windowed or Windowed mode for Persona 3 Reload. Exclusive
 fullscreen can prevent any desktop capture method from receiving the game frame

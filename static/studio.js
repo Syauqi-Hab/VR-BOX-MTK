@@ -8,6 +8,7 @@
   var displayTimer = null;
   var retryTimer = null;
   var streamReady = false;
+  var nextPreviewAt = 0;
   var displays = [];
 
   var canvas = document.getElementById("studioPreview");
@@ -158,7 +159,7 @@
       : display.label + " - " + detail + ".";
   }
 
-  function updateBackendMeta(backend) {
+  function updateBackendMeta(backend, timings) {
     var node = document.getElementById("backendMeta");
     if (!node) {
       return;
@@ -167,7 +168,13 @@
       node.textContent = "DXGI akan dipilih otomatis untuk monitor tunggal.";
       return;
     }
-    node.textContent = backend.detail || "Mesin capture sedang diperbarui.";
+    var detail = backend.detail || "Mesin capture sedang diperbarui.";
+    if (!timings || !timings.pipelineMs) {
+      node.textContent = detail;
+      return;
+    }
+    node.textContent = detail + " Rata-rata: capture " + timings.captureMs +
+      " ms, scale " + timings.resizeMs + " ms, JPEG " + timings.encodeMs + " ms.";
   }
 
   function updateFitMeta() {
@@ -261,17 +268,19 @@
       var viewers = status.viewers || { studio: 0, phone: 0, other: 0 };
       var target = capture.target || {};
       var backend = capture.backend || {};
+      var timings = capture.timings || {};
       var phoneCount = Number(viewers.phone || 0);
       var captureReadout = document.getElementById("captureReadout");
       var state = document.getElementById("streamState");
-      captureReadout.textContent = capture.width + " x " + capture.height + " - " + capture.measuredFps + " fps";
+      captureReadout.textContent = capture.width + " x " + capture.height + " - " +
+        capture.measuredFps + " / " + (capture.targetFps || "--") + " fps";
       document.getElementById("captureTargetReadout").textContent = target.label || "DESKTOP VIRTUAL";
       document.getElementById("streamReadout").textContent = capture.bitrateMbps + " Mbps / " + capture.ageMs + " ms";
       document.getElementById("backendReadout").textContent =
         String(backend.active || "menunggu").toUpperCase() + " / " + String(backend.requested || "auto").toUpperCase();
       document.getElementById("headsetReadout").textContent = phoneCount + " HP TERHUBUNG";
       updateDisplayMeta(displayForId(target.id));
-      updateBackendMeta(backend);
+      updateBackendMeta(backend, timings);
 
       if (capture.error) {
         state.textContent = "CAPTURE PERLU PERHATIAN";
@@ -632,7 +641,18 @@
     context.fillText("Izinkan screen capture Windows jika diminta.", 65, canvas.height / 2 + 19);
   }
 
-  function render() {
+  function render(timestamp) {
+    var now = Number(timestamp);
+    if (!Number.isFinite(now)) {
+      now = window.performance && window.performance.now ? window.performance.now() : Date.now();
+    }
+    var captureFps = settings && settings.capture ? Number(settings.capture.fps) : 30;
+    var previewFps = Math.min(30, Math.max(5, captureFps || 30));
+    if (now < nextPreviewAt) {
+      window.requestAnimationFrame(render);
+      return;
+    }
+    nextPreviewAt = now + 1000 / previewFps;
     drawBackdrop();
     if (settings && streamImage.naturalWidth > 0 && streamImage.naturalHeight > 0) {
       if (previewMode === "source") {
