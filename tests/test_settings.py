@@ -7,6 +7,7 @@ from PIL import Image
 from app import (
     DEFAULT_SETTINGS,
     ViewerRegistry,
+    adb_connected_serials,
     crop_image_to_display,
     dxgi_output_index,
     encode_stream_frame,
@@ -16,6 +17,14 @@ from app import (
 
 
 class SettingsValidationTests(unittest.TestCase):
+    def test_adb_connected_serials_ignores_offline_and_unauthorized_devices(self):
+        output = """List of devices attached
+ready\tdevice product:vivo_1910
+offline\toffline transport_id:2
+locked\tunauthorized usb:1-4
+"""
+        self.assertEqual(adb_connected_serials(output), ["ready"])
+
     def test_defaults_are_complete_for_bad_payload(self):
         self.assertEqual(sanitize_settings(None), DEFAULT_SETTINGS)
 

@@ -69,6 +69,29 @@ There are two wired routes:
 The ADB option uses the USB data cable as the network path and avoids depending
 on Wi-Fi. It requires the usual Android USB debugging confirmation on the phone.
 
+## Android APK
+
+LensCast now includes a small native Android shell around the existing phone
+renderer. It keeps the WebGL split-screen, manual VR calibration, and PC-managed
+settings from `/phone`, but opens it as an installable landscape app instead of a
+browser tab. The app is not a separate video encoder: LensCast PC must still be
+running to provide the stream.
+
+1. Build it by double-clicking
+   [Build LensCast VR APK.bat](<C:/Abie/Passion Project/VR/Build LensCast VR APK.bat>).
+2. Connect the Android phone with a data-capable USB-C cable, enable **USB
+   debugging**, and accept the RSA prompt on the phone.
+3. Double-click
+   [Install LensCast VR APK.bat](<C:/Abie/Passion Project/VR/Install LensCast VR APK.bat>).
+   It installs the debug APK and creates `adb reverse tcp:8264 tcp:8264`.
+4. Start LensCast PC, then open **LensCast VR** on the phone. Its default address
+   is `http://127.0.0.1:8264/phone`, which works through that USB tunnel.
+
+The APK output is
+`android/app/build/outputs/apk/debug/app-debug.apk`. It supports Android 8.0
+(API 26) or later. Tap the connection chip, or long-press the image, to change
+the saved PC endpoint when needed.
+
 ## Practical setup for games
 
 1. Start LensCast before starting the game.
@@ -124,11 +147,12 @@ on some Windows/GPU combinations.
 python -m unittest discover -v
 ~~~
 
-The project currently has no Android SDK or Java 17 installation on this PC, so
-the phone prototype is intentionally delivered as a direct browser client. It is
-the fastest path to validating VR Box fit and latency. A later native Android
-wrapper can reuse the same /phone interface or replace the MJPEG transport with
-WebRTC/H.264 without redesigning the Studio controls.
+To rebuild the Android APK from a terminal after the one-time Android tool setup:
+
+~~~powershell
+cd "C:\Abie\Passion Project\VR\android"
+.\gradlew.bat :app:assembleDebug --no-daemon
+~~~
 
 ## Project map
 
@@ -139,5 +163,6 @@ static/studio.js       Desktop preview and calibration controls
 static/phone.html      Phone VR interface
 static/mobile.js       WebGL dual-eye renderer
 static/app.css         Shared visual design and responsive layout
+android/               Native Android WebView wrapper and Gradle project
 tests/                 Settings validation tests
 ~~~

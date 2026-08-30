@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#000000">
+
+  <WebView
+      android:id="@+id/lenscast_webview"
+      android:layout_width="match_parent"
+      android:layout_height="match_parent"
+      android:background="#000000"
+      android:keepScreenOn="true" />
+
+  <Button
+      android:id="@+id/connection_button"
+      android:layout_width="wrap_content"
+      android:layout_height="40dp"
+      android:layout_gravity="top|end"
+      android:layout_margin="12dp"
+      android:alpha="0.94"
+      android:background="@drawable/connection_chip"
+      android:contentDescription="Atur koneksi PC LensCast"
+      android:minWidth="0dp"
+      android:paddingHorizontal="14dp"
+      android:text="PC"
+      android:textAllCaps="false"
+      android:textColor="#E8F7DC"
+      android:textSize="12sp" />
+</FrameLayout>

@@ -15,7 +15,9 @@ import io
 import json
 import os
 import re
+import shutil
 import socket
+import subprocess
 import sys
 import threading
 import time
@@ -977,6 +979,101 @@ class ViewerRegistry:
             return dict(self._counts)
 
 
+def adb_connected_serials(output: str) -> list[str]:
+    """Return only authorized ADB device serials from `adb devices` output."""
+    return [
+        line.split("\t", 1)[0]
+        for line in output.splitlines()
+        if "\tdevice" in line
+    ]
+
+
+def find_adb_path() -> str | None:
+    """Find ADB from PATH or the standard Android SDK location on Windows."""
+    executable = "adb.exe" if os.name == "nt" else "adb"
+    candidates = [shutil.which("adb")]
+    sdk_root = os.environ.get("ANDROID_SDK_ROOT") or os.environ.get("ANDROID_HOME")
+    if sdk_root:
+        candidates.append(str(Path(sdk_root) / "platform-tools" / executable))
+    local_app_data = os.environ.get("LOCALAPPDATA")
+    if local_app_data:
+        candidates.append(str(Path(local_app_data) / "Android" / "Sdk" / "platform-tools" / executable))
+    for candidate in candidates:
+        if candidate and Path(candidate).is_file():
+            return candidate
+    return None
+
+
+class AdbReverseKeeper:
+    """Restores the ADB reverse rule if Android restarts its USB transport."""
+
+    def __init__(self, port: int, interval_seconds: float = 3.0) -> None:
+        self._adb_path = find_adb_path()
+        self._port = port
+        self._interval_seconds = interval_seconds
+        self._stop_event = threading.Event()
+        self._thread: threading.Thread | None = None
+        self._last_state = ""
+
+    def start(self) -> None:
+        if not self._adb_path:
+            print("ADB USB tunnel tidak aktif: adb tidak ditemukan.", file=sys.stderr)
+            return
+        self._thread = threading.Thread(
+            target=self._maintain,
+            name="lenscast-adb-reverse",
+            daemon=True,
+        )
+        self._thread.start()
+
+    def stop(self) -> None:
+        self._stop_event.set()
+        if self._thread is not None:
+            self._thread.join(timeout=3)
+
+    def _maintain(self) -> None:
+        while not self._stop_event.is_set():
+            try:
+                result = subprocess.run(
+                    [self._adb_path, "devices"],
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
+                    check=False,
+                )
+                serials = adb_connected_serials(result.stdout)
+                if not serials:
+                    self._report_state("menunggu HP dengan USB debugging")
+                else:
+                    restored = all(self._restore_for(serial) for serial in serials)
+                    self._report_state("aktif" if restored else "gagal, akan mencoba lagi")
+            except (OSError, subprocess.SubprocessError):
+                self._report_state("gagal, akan mencoba lagi")
+            self._stop_event.wait(self._interval_seconds)
+
+    def _restore_for(self, serial: str) -> bool:
+        result = subprocess.run(
+            [
+                self._adb_path,
+                "-s",
+                serial,
+                "reverse",
+                f"tcp:{self._port}",
+                f"tcp:{self._port}",
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=5,
+            check=False,
+        )
+        return result.returncode == 0
+
+    def _report_state(self, state: str) -> None:
+        if state != self._last_state:
+            self._last_state = state
+            print(f"ADB USB tunnel: {state}.")
+
+
 class LensCastHTTPServer(ThreadingHTTPServer):
     daemon_threads = True
     allow_reuse_address = True
@@ -1157,6 +1254,11 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument("--host", default="0.0.0.0", help="Host interface (default: all interfaces)")
     parser.add_argument("--port", default=8264, type=int, help="HTTP port (default: 8264)")
     parser.add_argument("--no-browser", action="store_true", help="Do not open the Studio page automatically")
+    parser.add_argument(
+        "--adb-reverse",
+        action="store_true",
+        help="Keep an ADB USB reverse rule active for the selected port",
+    )
     return parser.parse_args()
 
 
@@ -1179,14 +1281,21 @@ def main() -> int:
         print(f"Could not start LensCast on port {args.port}: {error}", file=sys.stderr)
         return 1
 
+    adb_reverse = AdbReverseKeeper(server.server_address[1]) if args.adb_reverse else None
+    if adb_reverse is not None:
+        adb_reverse.start()
+
     local_url = f"http://127.0.0.1:{server.server_address[1]}/studio"
-    phone_urls = [f"http://{address}:{server.server_address[1]}/phone" for address in local_ipv4_addresses()]
     print("\nLensCast VR Studio is running.")
     print(f"Studio: {local_url}")
-    if phone_urls:
-        print("Phone:  " + phone_urls[0])
+    if args.host in {"127.0.0.1", "localhost"}:
+        print(f"Phone:  USB ADB -> http://127.0.0.1:{server.server_address[1]}/phone")
     else:
-        print("Phone:  use this PC's LAN IPv4 address with /phone")
+        phone_urls = [f"http://{address}:{server.server_address[1]}/phone" for address in local_ipv4_addresses()]
+        if phone_urls:
+            print("Phone:  " + phone_urls[0])
+        else:
+            print("Phone:  use this PC's LAN IPv4 address with /phone")
     print("Press Ctrl+C to stop.\n")
 
     if not args.no_browser:
@@ -1200,6 +1309,8 @@ def main() -> int:
         server.shutdown()
         server.server_close()
         capture.stop()
+        if adb_reverse is not None:
+            adb_reverse.stop()
     return 0
 
 

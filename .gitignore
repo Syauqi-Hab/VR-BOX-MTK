@@ -2,3 +2,8 @@ __pycache__/
 *.py[cod]
 lenscast-settings.json
 .venv/
+android/.gradle/
+android/local.properties
+android/app/build/
+android/build/
+android/.idea/
