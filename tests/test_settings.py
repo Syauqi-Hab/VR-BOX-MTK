@@ -1,5 +1,8 @@
 import io
+import os
+import subprocess
 import unittest
+from unittest.mock import patch
 
 import numpy as np
 from PIL import Image
@@ -12,11 +15,24 @@ from app import (
     dxgi_output_index,
     encode_stream_frame,
     fit_image_to_stream,
+    hidden_subprocess_kwargs,
+    parse_arguments,
     sanitize_settings,
 )
 
 
 class SettingsValidationTests(unittest.TestCase):
+    def test_adb_subprocesses_hide_console_windows_on_windows(self):
+        kwargs = hidden_subprocess_kwargs()
+        if os.name == "nt":
+            self.assertEqual(kwargs, {"creationflags": subprocess.CREATE_NO_WINDOW})
+        else:
+            self.assertEqual(kwargs, {})
+
+    def test_server_defaults_to_loopback_only(self):
+        with patch("sys.argv", ["app.py"]):
+            self.assertEqual(parse_arguments().host, "127.0.0.1")
+
     def test_adb_connected_serials_ignores_offline_and_unauthorized_devices(self):
         output = """List of devices attached
 ready\tdevice product:vivo_1910
@@ -45,6 +61,10 @@ locked\tunauthorized usb:1-4
         self.assertFalse(sanitize_settings({"capture": {"paused": 1}})["capture"]["paused"])
         self.assertTrue(sanitize_settings({"capture": {"paused": True}})["capture"]["paused"])
 
+    def test_native_resolution_requires_a_boolean(self):
+        self.assertFalse(sanitize_settings({"headset": {"nativeResolution": 1}})["headset"]["nativeResolution"])
+        self.assertTrue(sanitize_settings({"headset": {"nativeResolution": True}})["headset"]["nativeResolution"])
+
     def test_display_id_accepts_windows_display_names_only(self):
         display_id = chr(92) * 2 + "." + chr(92) + "DISPLAY3"
         settings = sanitize_settings({"capture": {"display": display_id}})
@@ -68,6 +88,10 @@ locked\tunauthorized usb:1-4
         self.assertEqual(settings["stream"], {"width": 1278, "height": 720})
         self.assertEqual(settings["source"]["fit"], "cover")
         self.assertEqual(sanitize_settings({"source": {"fit": "invalid"}})["source"]["fit"], "contain")
+
+    def test_stream_accepts_full_hd_maximum(self):
+        settings = sanitize_settings({"stream": {"width": 1920, "height": 1080}})
+        self.assertEqual(settings["stream"], {"width": 1920, "height": 1080})
 
     def test_stream_letterboxes_without_cropping_or_stretching(self):
         source = Image.new("RGB", (160, 90), "#ff0000")

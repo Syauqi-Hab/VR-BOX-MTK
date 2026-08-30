@@ -25,7 +25,8 @@
   var streamPresets = {
     light: { width: 960, height: 540 },
     game: { width: 1280, height: 720 },
-    sharp: { width: 1600, height: 900 }
+    sharp: { width: 1600, height: 900 },
+    ultra: { width: 1920, height: 1080 }
   };
   var headsetPresets = {
     wide: {
@@ -109,6 +110,7 @@
     updateDisplayMeta();
     updateFitMeta();
     updateStreamMeta();
+    updateRenderResolutionMeta();
   }
 
   function valuesMatch(actual, expected) {
@@ -206,6 +208,16 @@
     if (note) {
       note.textContent = "" + width + " x " + height + " (" + pixels.toFixed(2) + " MP). Satu frame 16:9 digandakan oleh GPU HP.";
     }
+  }
+
+  function updateRenderResolutionMeta() {
+    var note = document.getElementById("renderResolutionMeta");
+    if (!note || !settings || !settings.headset) {
+      return;
+    }
+    note.textContent = settings.headset.nativeResolution
+      ? "Tajam native aktif: HP boleh merender hingga DPR 3. Pantau FPS dan suhu HP saat bermain."
+      : "Mode seimbang aktif: renderer HP dibatasi DPR 2 agar frame rate lebih stabil.";
   }
 
   function applySettingsGroup(group, values) {

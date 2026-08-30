@@ -1,14 +1,13 @@
 # LensCast VR Studio
 
 LensCast is a runnable MVP for watching a normal Windows desktop or PC game in a
-phone VR Box. It mirrors the desktop to a phone over the local network, duplicates
+phone VR Box. It mirrors the desktop to a phone over a local USB tunnel, duplicates
 the image into left/right eye views, and exposes manual calibration for different
 VR Box and full-screen phone layouts.
 
-This first version is a local Wi-Fi prototype. The server uses MJPEG so it can run
-without Node, Android Studio, or a native phone install. The phone interface is a
-web app at /phone; Chrome on Android can open it directly and use full-screen
-landscape mode.
+The server uses MJPEG so it can run without Node, Android Studio, or a native
+phone install. It binds to `127.0.0.1` by default; the phone interface is a web
+app at /phone delivered through the USB ADB tunnel.
 
 ## What is included
 
@@ -20,18 +19,27 @@ landscape mode.
 - A desktop control interface at /studio with an OBS-like live preview.
 - Select the virtual desktop or a specific Windows monitor as the capture source.
 - One-click quality profiles plus live bitrate, frame age, monitor, and headset status.
-- Fixed stream-frame presets (`960x540`, `1280x720`, and `1600x900`) with
+- Fixed stream-frame presets (`960x540`, `1280x720`, `1600x900`, and `1920x1080`) with
   automatic black letterboxing instead of stretched output.
 - One shared settings model: changing a Studio slider updates the HP renderer.
 - Independent control for source crop, eye width/height, eye gap, offsets, zoom,
   barrel distortion, curvature, brightness, and fit mode.
 - Phone rendering through WebGL for two eye regions and lens distortion.
+- Optional native-sharpness mode that renders the phone canvas up to DPR 3 for
+  compatible 1080x2400 displays; it uses more phone GPU power than the default DPR 2 mode.
 - A Canvas fallback for phones/browsers without WebGL.
 - Persistent settings in lenscast-settings.json after the first run.
 
 ## Start
 
-Double-click [Start LensCast.bat](<C:/Abie/Passion Project/VR/Start LensCast.bat>), or run:
+For the normal USB workflow, double-click
+[Open LensCast PC.bat](<C:/Abie/Passion Project/VR/Open LensCast PC.bat>) and
+press **Connect USB**. The PC dashboard starts LensCast locally, creates the
+ADB tunnel, and opens the installed LensCast VR app on the phone automatically.
+Use **Buka Studio Kalibrasi** in that dashboard to tune the headset preview.
+
+The original browser-first start is still available by double-clicking
+[Start LensCast.bat](<C:/Abie/Passion Project/VR/Start LensCast.bat>), or by running:
 
 ~~~powershell
 cd "C:\Abie\Passion Project\VR"
@@ -68,6 +76,24 @@ There are two wired routes:
 
 The ADB option uses the USB data cable as the network path and avoids depending
 on Wi-Fi. It requires the usual Android USB debugging confirmation on the phone.
+
+## LensCast PC
+
+`LensCast PC` is the one-click Windows control dashboard for the USB route:
+
+1. Connect the Android phone by USB-C and keep USB debugging enabled.
+2. Open [Open LensCast PC.bat](<C:/Abie/Passion Project/VR/Open LensCast PC.bat>).
+3. Press **Connect USB**. The dashboard starts only a `127.0.0.1` server,
+   restores `adb reverse` automatically after a USB reset, and opens LensCast VR
+   on every connected authorized phone.
+4. Press **Buka Studio Kalibrasi** for the OBS-style preview and optical controls.
+
+To make a portable Windows executable, run
+[Build LensCast PC EXE.bat](<C:/Abie/Passion Project/VR/Build LensCast PC EXE.bat>). It
+creates `dist/LensCast PC/LensCast PC.exe` after the one-time PyInstaller installation.
+
+The Wi-Fi card is visible but intentionally locked. USB is the safe default;
+activating live desktop sharing over the local Wi-Fi requires explicit approval.
 
 ## Android APK
 
@@ -164,5 +190,6 @@ static/phone.html      Phone VR interface
 static/mobile.js       WebGL dual-eye renderer
 static/app.css         Shared visual design and responsive layout
 android/               Native Android WebView wrapper and Gradle project
+lenscast_pc.py         Native one-click Windows connection dashboard
 tests/                 Settings validation tests
 ~~~

@@ -114,6 +114,9 @@
           <button class="preset-button" data-stream-preset="sharp" type="button">
             <b>Tajam 900p</b><small>1600 x 900</small>
           </button>
+          <button class="preset-button" data-stream-preset="ultra" type="button">
+            <b>Ultra 1080p</b><small>1920 x 1080</small>
+          </button>
         </div>
         <p class="control-note" id="streamMeta">Frame dikirim satu kali, lalu digandakan oleh GPU HP.</p>
         <label class="switch-control">
@@ -267,6 +270,19 @@
           <span>Kecerahan <output data-output="headset.brightness"></output></span>
           <input data-path="headset.brightness" data-unit="x" data-decimals="2" type="range" min="0.5" max="1.5" step="0.01">
         </label>
+      </section>
+
+      <section class="control-section">
+        <div class="section-title"><span>Ketajaman tampilan</span><span class="micro-pill lime">RENDER HP</span></div>
+        <label class="switch-control">
+          <span>
+            <b>Mode tajam native</b>
+            <small>Render hingga DPR 3. Lebih tajam di layar 1080 x 2400, tetapi lebih berat untuk GPU HP.</small>
+          </span>
+          <input data-path="headset.nativeResolution" type="checkbox">
+          <i aria-hidden="true"></i>
+        </label>
+        <p class="control-note" id="renderResolutionMeta">Mode seimbang memakai DPR 2 agar frame rate HP tetap stabil.</p>
       </section>
     </aside>
   </main>

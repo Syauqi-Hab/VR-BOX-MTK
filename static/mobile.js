@@ -122,6 +122,27 @@
     return 0;
   }
 
+  function renderPixelRatio() {
+    var deviceRatio = Math.max(1, Number(window.devicePixelRatio) || 1);
+    var headset = settings && settings.headset ? settings.headset : null;
+    var maximum = headset && headset.nativeResolution ? 3 : 2;
+    return Math.min(deviceRatio, maximum);
+  }
+
+  function updateRenderMeta() {
+    var node = document.getElementById("phoneRenderMeta");
+    if (!node) {
+      return;
+    }
+    var ratio = renderPixelRatio();
+    var width = Math.max(1, Math.floor(window.innerWidth * ratio));
+    var height = Math.max(1, Math.floor(window.innerHeight * ratio));
+    var nativeEnabled = Boolean(settings && settings.headset && settings.headset.nativeResolution);
+    node.textContent = nativeEnabled
+      ? "Tajam aktif: canvas " + width + " x " + height + " pada DPR " + ratio.toFixed(0) + "."
+      : "Mode seimbang: canvas " + width + " x " + height + " pada DPR " + ratio.toFixed(0) + ".";
+  }
+
   function rangeFill(control) {
     var minimum = Number(control.min);
     var maximum = Number(control.max);
@@ -135,13 +156,18 @@
     }
     controls.forEach(function (control) {
       var value = getPath(settings, control.dataset.path);
-      control.value = value;
-      rangeFill(control);
+      if (control.type === "checkbox") {
+        control.checked = Boolean(value);
+      } else {
+        control.value = value;
+        rangeFill(control);
+      }
     });
     outputNodes.forEach(function (output) {
       var control = document.querySelector("[data-path='" + output.dataset.output + "']");
       output.textContent = numberFormat(getPath(settings, output.dataset.output), control);
     });
+    updateRenderMeta();
   }
 
   function queueSave() {
@@ -161,11 +187,13 @@
   }
 
   controls.forEach(function (control) {
-    control.addEventListener("input", function () {
+    var eventName = control.type === "checkbox" ? "change" : "input";
+    control.addEventListener(eventName, function () {
       if (!settings) {
         return;
       }
-      setPath(settings, control.dataset.path, Number(control.value));
+      var value = control.type === "checkbox" ? control.checked : Number(control.value);
+      setPath(settings, control.dataset.path, value);
       lastLocalChange = Date.now();
       refreshControls();
       queueSave();
@@ -244,7 +272,7 @@
       var lastTextureUploadAt = 0;
 
       function resize() {
-        var ratio = Math.min(window.devicePixelRatio || 1, 2);
+        var ratio = renderPixelRatio();
         var width = Math.max(1, Math.floor(window.innerWidth * ratio));
         var height = Math.max(1, Math.floor(window.innerHeight * ratio));
         if (canvas.width !== width || canvas.height !== height) {
@@ -355,7 +383,7 @@
     }
 
     function render() {
-      var ratio = Math.min(window.devicePixelRatio || 1, 2);
+      var ratio = renderPixelRatio();
       var width = Math.max(1, Math.floor(window.innerWidth * ratio));
       var height = Math.max(1, Math.floor(window.innerHeight * ratio));
       if (canvas.width !== width || canvas.height !== height) {
@@ -503,8 +531,14 @@
     });
     startStream();
     pollingTimer = window.setInterval(pollSettings, 1000);
-    window.addEventListener("resize", updateOrientationNotice);
-    window.addEventListener("orientationchange", updateOrientationNotice);
+    window.addEventListener("resize", function () {
+      updateOrientationNotice();
+      updateRenderMeta();
+    });
+    window.addEventListener("orientationchange", function () {
+      updateOrientationNotice();
+      updateRenderMeta();
+    });
     updateOrientationNotice();
     loop();
   }

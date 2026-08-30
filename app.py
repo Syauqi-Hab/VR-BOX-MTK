@@ -46,7 +46,7 @@ except ImportError:
 
 APP_DIR = Path(__file__).resolve().parent
 STATIC_DIR = APP_DIR / "static"
-CONFIG_PATH = APP_DIR / "lenscast-settings.json"
+CONFIG_PATH = Path(os.environ.get("LENSCAST_CONFIG_PATH", APP_DIR / "lenscast-settings.json"))
 BOUNDARY = "lenscast-frame"
 DISPLAY_ID_PATTERN = re.compile(r"^\\\\\.\\DISPLAY\d+$", re.IGNORECASE)
 CAPTURE_BACKENDS = {"auto", "dxgi", "pillow"}
@@ -87,6 +87,7 @@ DEFAULT_SETTINGS: dict[str, dict[str, Any]] = {
         "barrel": 0.12,
         "curvature": 0.08,
         "brightness": 1.0,
+        "nativeResolution": False,
     },
 }
 
@@ -142,7 +143,10 @@ def sanitize_settings(candidate: Any) -> dict[str, dict[str, Any]]:
                 if isinstance(raw_value, str) and raw_value in SOURCE_FIT_MODES:
                     result[group][key] = raw_value
                 continue
-            if (group, key) == ("capture", "paused"):
+            if (group, key) in {
+                ("capture", "paused"),
+                ("headset", "nativeResolution"),
+            }:
                 if isinstance(raw_value, bool):
                     result[group][key] = raw_value
                 continue
@@ -1004,6 +1008,13 @@ def find_adb_path() -> str | None:
     return None
 
 
+def hidden_subprocess_kwargs() -> dict[str, int]:
+    """Prevent short-lived Windows console windows from ADB maintenance calls."""
+    if os.name == "nt":
+        return {"creationflags": getattr(subprocess, "CREATE_NO_WINDOW", 0)}
+    return {}
+
+
 class AdbReverseKeeper:
     """Restores the ADB reverse rule if Android restarts its USB transport."""
 
@@ -1040,6 +1051,7 @@ class AdbReverseKeeper:
                     text=True,
                     timeout=5,
                     check=False,
+                    **hidden_subprocess_kwargs(),
                 )
                 serials = adb_connected_serials(result.stdout)
                 if not serials:
@@ -1065,6 +1077,7 @@ class AdbReverseKeeper:
             stderr=subprocess.DEVNULL,
             timeout=5,
             check=False,
+            **hidden_subprocess_kwargs(),
         )
         return result.returncode == 0
 
@@ -1251,7 +1264,7 @@ class LensCastRequestHandler(BaseHTTPRequestHandler):
 
 def parse_arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="LensCast VR Studio local streaming server")
-    parser.add_argument("--host", default="0.0.0.0", help="Host interface (default: all interfaces)")
+    parser.add_argument("--host", default="127.0.0.1", help="Host interface (default: loopback only)")
     parser.add_argument("--port", default=8264, type=int, help="HTTP port (default: 8264)")
     parser.add_argument("--no-browser", action="store_true", help="Do not open the Studio page automatically")
     parser.add_argument(

@@ -33,9 +33,11 @@ public final class MainActivity extends Activity {
     private static final String ENDPOINT_KEY = "endpoint";
     private static final String DEFAULT_ENDPOINT = "http://127.0.0.1:8264/phone";
     private static final long CONNECTION_CHIP_TIMEOUT_MS = 4_000L;
+    private static final long RECONNECT_DELAY_MS = 2_000L;
 
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final Runnable hideConnectionChip = this::hideConnectionChip;
+    private final Runnable retryConnection = this::loadLensCast;
 
     private WebView webView;
     private Button connectionButton;
@@ -50,7 +52,13 @@ public final class MainActivity extends Activity {
 
         webView = findViewById(R.id.lenscast_webview);
         connectionButton = findViewById(R.id.connection_button);
-        connectionButton.setOnClickListener(view -> showEndpointDialog());
+        connectionButton.setOnClickListener(view -> {
+            if (mainFrameLoadFailed) {
+                loadLensCast();
+            } else {
+                showEndpointDialog();
+            }
+        });
         webView.setOnLongClickListener(view -> {
             showEndpointDialog();
             return true;
@@ -98,6 +106,7 @@ public final class MainActivity extends Activity {
             @Override
             public void onPageFinished(WebView view, String url) {
                 if (!mainFrameLoadFailed) {
+                    handler.removeCallbacks(retryConnection);
                     showConnectionChip(false);
                 }
             }
@@ -110,14 +119,17 @@ public final class MainActivity extends Activity {
             ) {
                 if (request.isForMainFrame()) {
                     mainFrameLoadFailed = true;
-                    connectionButton.setText("PC belum terhubung - sentuh untuk atur");
+                    connectionButton.setText("PC belum terhubung - coba lagi");
                     showConnectionChip(true);
+                    handler.removeCallbacks(retryConnection);
+                    handler.postDelayed(retryConnection, RECONNECT_DELAY_MS);
                 }
             }
         });
     }
 
     private void loadLensCast() {
+        handler.removeCallbacks(retryConnection);
         mainFrameLoadFailed = false;
         updateConnectionButton();
         webView.loadUrl(getEndpoint());
@@ -149,7 +161,7 @@ public final class MainActivity extends Activity {
 
         AlertDialog dialog = new AlertDialog.Builder(this)
                 .setTitle("Koneksi PC LensCast")
-                .setMessage("USB ADB memakai http://127.0.0.1:8264/phone. Masukkan alamat PC bila memakai koneksi lain.")
+                .setMessage("USB memakai http://127.0.0.1:8264/phone. Tekan Connect USB di PC; masukkan alamat lain hanya bila memakai koneksi berbeda.")
                 .setView(container)
                 .setNegativeButton("Batal", null)
                 .setPositiveButton("Simpan", null)
@@ -256,6 +268,7 @@ public final class MainActivity extends Activity {
 
     @Override
     protected void onPause() {
+        handler.removeCallbacks(retryConnection);
         webView.onPause();
         super.onPause();
     }
@@ -265,6 +278,9 @@ public final class MainActivity extends Activity {
         super.onResume();
         webView.onResume();
         enterImmersiveMode();
+        if (mainFrameLoadFailed) {
+            loadLensCast();
+        }
     }
 
     @Override

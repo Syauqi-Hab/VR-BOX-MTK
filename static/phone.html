@@ -80,6 +80,15 @@
         <span>Kecerahan <output data-output="headset.brightness"></output></span>
         <input data-path="headset.brightness" data-unit="x" data-decimals="2" type="range" min="0.5" max="1.5" step="0.01">
       </label>
+      <label class="switch-control">
+        <span>
+          <b>Mode tajam native</b>
+          <small>Render hingga DPR 3. Lebih tajam, tetapi GPU HP bekerja lebih berat.</small>
+        </span>
+        <input data-path="headset.nativeResolution" type="checkbox">
+        <i aria-hidden="true"></i>
+      </label>
+      <p class="control-note" id="phoneRenderMeta">Mode seimbang memakai DPR 2.</p>
     </div>
   </section>
 
