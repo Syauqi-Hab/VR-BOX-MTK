@@ -1,6 +1,7 @@
 __pycache__/
 *.py[cod]
 lenscast-settings.json
+lenscast-lens-profiles.json
 .venv/
 android/.gradle/
 android/local.properties

@@ -358,6 +358,78 @@ button {
   background: #ecf1e8;
 }
 
+.lens-profile-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  margin: 8px 0 12px;
+}
+
+.lens-profile-button,
+.lens-profile-save {
+  min-height: 34px;
+  border: 1px solid rgba(216, 237, 213, 0.22);
+  border-radius: 0;
+  color: #dce8dd;
+  background: rgba(4, 12, 12, 0.42);
+  font-family: var(--display);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.lens-profile-button:hover,
+.lens-profile-save:hover {
+  border-color: rgba(200, 255, 112, 0.52);
+  background: rgba(200, 255, 112, 0.1);
+}
+
+.lens-profile-delete {
+  color: #ffae9c;
+}
+
+.lens-profile-button:disabled {
+  cursor: default;
+  opacity: 0.42;
+}
+
+.lens-profile-name {
+  display: block;
+  margin-bottom: 8px;
+}
+
+.lens-profile-name > span {
+  display: block;
+  margin-bottom: 7px;
+  color: #aab8ae;
+  font-size: 11px;
+}
+
+.lens-profile-name input {
+  width: 100%;
+  min-height: 35px;
+  padding: 0 10px;
+  border: 1px solid rgba(209, 238, 204, 0.23);
+  border-radius: 0;
+  color: #e8f3e8;
+  outline: none;
+  background: rgba(4, 12, 12, 0.55);
+  font-family: var(--display);
+  font-size: 11px;
+}
+
+.lens-profile-name input:focus {
+  border-color: var(--lime);
+  box-shadow: 0 0 0 2px rgba(200, 255, 112, 0.11);
+}
+
+.lens-profile-save {
+  width: 100%;
+  color: var(--lime);
+  border-color: rgba(200, 255, 112, 0.38);
+}
+
 .control-note {
   min-height: 28px;
   margin: 8px 0 0;
@@ -1213,5 +1285,51 @@ input[type="range"]::-moz-range-thumb {
 @media (orientation: portrait) and (max-width: 820px) {
   .phone-onboarding {
     align-items: end;
+  }
+}
+
+@media (orientation: landscape) and (max-height: 540px) {
+  .phone-onboarding {
+    padding: 12px;
+    overflow-y: auto;
+  }
+
+  .onboarding-card {
+    width: min(620px, 100%);
+    padding: 16px 20px;
+  }
+
+  .onboarding-card h1 {
+    font-size: clamp(21px, 4vw, 28px);
+  }
+
+  .onboarding-card p {
+    margin: 7px 0 10px;
+    font-size: 11px;
+    line-height: 1.32;
+  }
+
+  .phone-checklist {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+    margin-bottom: 12px;
+    font-size: 10px;
+  }
+
+  .phone-checklist li {
+    gap: 5px;
+  }
+
+  .phone-checklist li::before {
+    width: 12px;
+    font-size: 8px;
+  }
+
+  .mobile-primary {
+    min-height: 38px;
+  }
+
+  .mobile-state {
+    margin-top: 7px;
   }
 }

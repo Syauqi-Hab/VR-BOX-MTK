@@ -10,6 +10,7 @@
   var streamReady = false;
   var nextPreviewAt = 0;
   var displays = [];
+  var lensProfiles = [];
 
   var canvas = document.getElementById("studioPreview");
   var context = canvas.getContext("2d");
@@ -220,6 +221,123 @@
       : "Mode seimbang aktif: renderer HP dibatasi DPR 2 agar frame rate lebih stabil.";
   }
 
+  function setLensProfileMeta(message) {
+    var node = document.getElementById("lensProfileMeta");
+    if (node) {
+      node.textContent = message;
+    }
+  }
+
+  function selectedLensProfile() {
+    var select = document.getElementById("lensProfileSelect");
+    if (!select || !select.value) {
+      return null;
+    }
+    return lensProfiles.filter(function (profile) {
+      return profile.name === select.value;
+    })[0] || null;
+  }
+
+  function updateLensProfileButtons() {
+    var selected = selectedLensProfile();
+    document.getElementById("loadLensProfileButton").disabled = !selected;
+    document.getElementById("deleteLensProfileButton").disabled = !selected;
+  }
+
+  function renderLensProfiles(selectedName) {
+    var select = document.getElementById("lensProfileSelect");
+    if (!select) {
+      return;
+    }
+    var desiredName = selectedName === undefined ? select.value : selectedName;
+    select.textContent = "";
+    var placeholder = document.createElement("option");
+    placeholder.value = "";
+    placeholder.textContent = lensProfiles.length
+      ? "Pilih profil lensa"
+      : "Belum ada profil tersimpan";
+    select.appendChild(placeholder);
+    lensProfiles.forEach(function (profile) {
+      var option = document.createElement("option");
+      option.value = profile.name;
+      option.textContent = profile.name;
+      select.appendChild(option);
+    });
+    select.value = lensProfiles.some(function (profile) {
+      return profile.name === desiredName;
+    }) ? desiredName : "";
+    updateLensProfileButtons();
+  }
+
+  function loadLensProfiles() {
+    return requestJson("/api/lens-profiles").then(function (payload) {
+      lensProfiles = Array.isArray(payload.profiles) ? payload.profiles : [];
+      renderLensProfiles();
+      setLensProfileMeta(lensProfiles.length
+        ? lensProfiles.length + " profil lensa tersimpan di PC ini."
+        : "Kalibrasi aktif tersimpan otomatis. Simpan profil untuk VR Box berbeda.");
+    })["catch"](function () {
+      setLensProfileMeta("Profil lensa belum dapat dibaca dari server.");
+    });
+  }
+
+  function saveLensProfile() {
+    if (!settings || !settings.headset) {
+      setLensProfileMeta("Tunggu Studio selesai memuat kalibrasi.");
+      return;
+    }
+    var input = document.getElementById("lensProfileName");
+    var name = input.value.trim();
+    if (!name) {
+      input.focus();
+      setLensProfileMeta("Masukkan nama profil sebelum menyimpan.");
+      return;
+    }
+    requestJson("/api/lens-profiles", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: name, headset: settings.headset })
+    }).then(function (payload) {
+      lensProfiles = Array.isArray(payload.profiles) ? payload.profiles : [];
+      renderLensProfiles(payload.saved);
+      input.value = "";
+      setLensProfileMeta(payload.created
+        ? "Profil " + payload.saved + " disimpan."
+        : "Profil " + payload.saved + " diperbarui.");
+    })["catch"](function () {
+      setLensProfileMeta("Profil tidak dapat disimpan. Periksa koneksi Studio.");
+    });
+  }
+
+  function loadSelectedLensProfile() {
+    var profile = selectedLensProfile();
+    if (!profile) {
+      setLensProfileMeta("Pilih profil lensa yang akan dimuat.");
+      return;
+    }
+    applySettingsGroup("headset", profile.headset);
+    setLensProfileMeta("Profil " + profile.name + " dimuat ke kalibrasi aktif.");
+  }
+
+  function deleteSelectedLensProfile() {
+    var profile = selectedLensProfile();
+    if (!profile) {
+      return;
+    }
+    if (!window.confirm("Hapus profil lensa " + profile.name + "?")) {
+      return;
+    }
+    requestJson("/api/lens-profiles?name=" + encodeURIComponent(profile.name), {
+      method: "DELETE"
+    }).then(function (payload) {
+      lensProfiles = Array.isArray(payload.profiles) ? payload.profiles : [];
+      renderLensProfiles();
+      setLensProfileMeta("Profil " + payload.deleted + " dihapus.");
+    })["catch"](function () {
+      setLensProfileMeta("Profil tidak dapat dihapus. Periksa koneksi Studio.");
+    });
+  }
+
   function applySettingsGroup(group, values) {
     Object.keys(values).forEach(function (key) {
       settings[group][key] = values[key];
@@ -404,6 +522,17 @@
 
   document.getElementById("refreshDisplaysButton").addEventListener("click", function () {
     loadDisplays();
+  });
+
+  document.getElementById("lensProfileSelect").addEventListener("change", updateLensProfileButtons);
+  document.getElementById("saveLensProfileButton").addEventListener("click", saveLensProfile);
+  document.getElementById("loadLensProfileButton").addEventListener("click", loadSelectedLensProfile);
+  document.getElementById("deleteLensProfileButton").addEventListener("click", deleteSelectedLensProfile);
+  document.getElementById("lensProfileName").addEventListener("keydown", function (event) {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      saveLensProfile();
+    }
   });
 
   Array.prototype.slice.call(document.querySelectorAll("[data-quality-preset]")).forEach(function (button) {
@@ -695,7 +824,7 @@
     requestJson("/api/settings").then(function (initialSettings) {
       settings = initialSettings;
       refreshControls();
-      return Promise.all([updateStatus(), loadDisplays()]);
+      return Promise.all([updateStatus(), loadDisplays(), loadLensProfiles()]);
     })["catch"](function (error) {
       document.getElementById("streamState").textContent = "GAGAL MEMUAT STUDIO";
       setConnectionText(error.message);

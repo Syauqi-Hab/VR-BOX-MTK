@@ -224,6 +224,26 @@
         </div>
       </section>
 
+      <section class="control-section lens-profile-section">
+        <div class="section-title"><span>Profil lensa</span><span class="micro-pill lime">LOKAL PC</span></div>
+        <label class="select-control">
+          <span>Profil tersimpan</span>
+          <select id="lensProfileSelect" aria-label="Profil lensa tersimpan">
+            <option value="">Belum ada profil tersimpan</option>
+          </select>
+        </label>
+        <div class="lens-profile-actions">
+          <button class="lens-profile-button" id="loadLensProfileButton" type="button" disabled>Muat profil</button>
+          <button class="lens-profile-button lens-profile-delete" id="deleteLensProfileButton" type="button" disabled>Hapus</button>
+        </div>
+        <label class="lens-profile-name">
+          <span>Nama profil baru</span>
+          <input id="lensProfileName" type="text" maxlength="32" autocomplete="off" placeholder="Contoh: VR Box sofa">
+        </label>
+        <button class="lens-profile-save" id="saveLensProfileButton" type="button">Simpan profil lensa</button>
+        <p class="control-note" id="lensProfileMeta">Kalibrasi aktif tersimpan otomatis. Simpan profil untuk VR Box berbeda.</p>
+      </section>
+
       <section class="control-section">
         <div class="section-title"><span>Ukuran area mata</span></div>
         <label class="range-control">

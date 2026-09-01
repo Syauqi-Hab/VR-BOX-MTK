@@ -24,10 +24,14 @@ app at /phone delivered through the USB ADB tunnel.
 - One shared settings model: changing a Studio slider updates the HP renderer.
 - Independent control for source crop, eye width/height, eye gap, offsets, zoom,
   barrel distortion, curvature, brightness, and fit mode.
+- Named lens profiles saved locally on the PC, so separate VR Box calibrations can
+  be saved, loaded, updated, or deleted without changing capture settings.
 - Phone rendering through WebGL for two eye regions and lens distortion.
 - Optional native-sharpness mode that renders the phone canvas up to DPR 3 for
   compatible 1080x2400 displays; it uses more phone GPU power than the default DPR 2 mode.
 - A Canvas fallback for phones/browsers without WebGL.
+- A compact landscape onboarding card keeps the "Masuk mode VR" button reachable
+  on short phone screens.
 - Persistent settings in lenscast-settings.json after the first run.
 
 ## Start

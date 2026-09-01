@@ -47,10 +47,18 @@ except ImportError:
 APP_DIR = Path(__file__).resolve().parent
 STATIC_DIR = APP_DIR / "static"
 CONFIG_PATH = Path(os.environ.get("LENSCAST_CONFIG_PATH", APP_DIR / "lenscast-settings.json"))
+LENS_PROFILES_PATH = Path(
+    os.environ.get(
+        "LENSCAST_LENS_PROFILES_PATH",
+        CONFIG_PATH.with_name("lenscast-lens-profiles.json"),
+    )
+)
 BOUNDARY = "lenscast-frame"
 DISPLAY_ID_PATTERN = re.compile(r"^\\\\\.\\DISPLAY\d+$", re.IGNORECASE)
 CAPTURE_BACKENDS = {"auto", "dxgi", "pillow"}
 SOURCE_FIT_MODES = {"contain", "cover", "stretch"}
+MAX_LENS_PROFILES = 12
+MAX_LENS_PROFILE_NAME_LENGTH = 32
 HAS_OPENCV = cv2 is not None and np is not None
 
 if HAS_OPENCV:
@@ -180,6 +188,59 @@ def read_saved_settings() -> dict[str, dict[str, Any]]:
         return copy.deepcopy(DEFAULT_SETTINGS)
 
 
+def normalize_lens_profile_name(value: Any) -> str:
+    """Return a readable, bounded profile name suitable for JSON storage."""
+    if not isinstance(value, str):
+        raise ValueError("Nama profil harus berupa teks.")
+    name = " ".join(value.split())
+    if not name:
+        raise ValueError("Masukkan nama profil lensa.")
+    if len(name) > MAX_LENS_PROFILE_NAME_LENGTH:
+        raise ValueError(f"Nama profil maksimal {MAX_LENS_PROFILE_NAME_LENGTH} karakter.")
+    if any(ord(character) < 32 for character in name):
+        raise ValueError("Nama profil berisi karakter yang tidak valid.")
+    return name
+
+
+def sanitize_lens_profile(candidate: Any) -> dict[str, Any]:
+    if not isinstance(candidate, dict):
+        raise ValueError("Data profil lensa tidak valid.")
+    headset = candidate.get("headset")
+    if not isinstance(headset, dict):
+        raise ValueError("Profil lensa tidak memiliki data headset.")
+    return {
+        "name": normalize_lens_profile_name(candidate.get("name")),
+        "headset": sanitize_settings({"headset": headset})["headset"],
+    }
+
+
+def read_saved_lens_profiles(path: Path = LENS_PROFILES_PATH) -> list[dict[str, Any]]:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (FileNotFoundError, OSError, json.JSONDecodeError):
+        return []
+
+    candidates = payload.get("profiles") if isinstance(payload, dict) else payload
+    if not isinstance(candidates, list):
+        return []
+
+    profiles: list[dict[str, Any]] = []
+    names: set[str] = set()
+    for candidate in candidates:
+        try:
+            profile = sanitize_lens_profile(candidate)
+        except ValueError:
+            continue
+        key = profile["name"].casefold()
+        if key in names:
+            continue
+        names.add(key)
+        profiles.append(profile)
+        if len(profiles) >= MAX_LENS_PROFILES:
+            break
+    return profiles
+
+
 class SettingsStore:
     def __init__(self) -> None:
         self._lock = threading.RLock()
@@ -216,6 +277,59 @@ class SettingsStore:
             os.replace(temporary_path, CONFIG_PATH)
         except OSError as error:
             print(f"Warning: settings could not be saved: {error}", file=sys.stderr)
+
+
+class LensProfileStore:
+    """Persist named headset-only calibrations independently from live settings."""
+
+    def __init__(self, path: Path = LENS_PROFILES_PATH) -> None:
+        self._path = path
+        self._lock = threading.RLock()
+        self._profiles = read_saved_lens_profiles(path)
+
+    def get(self) -> list[dict[str, Any]]:
+        with self._lock:
+            return copy.deepcopy(self._profiles)
+
+    def save(self, name: Any, headset: Any) -> tuple[dict[str, Any], bool]:
+        profile = sanitize_lens_profile({"name": name, "headset": headset})
+        key = profile["name"].casefold()
+        with self._lock:
+            for index, existing in enumerate(self._profiles):
+                if existing["name"].casefold() == key:
+                    # Keep the original label so an update does not duplicate the profile.
+                    profile["name"] = existing["name"]
+                    self._profiles[index] = profile
+                    self._save_unlocked()
+                    return copy.deepcopy(profile), False
+            if len(self._profiles) >= MAX_LENS_PROFILES:
+                raise ValueError(f"Maksimal {MAX_LENS_PROFILES} profil lensa dapat disimpan.")
+            self._profiles.append(profile)
+            self._save_unlocked()
+            return copy.deepcopy(profile), True
+
+    def delete(self, name: Any) -> str:
+        normalized_name = normalize_lens_profile_name(name)
+        key = normalized_name.casefold()
+        with self._lock:
+            for index, profile in enumerate(self._profiles):
+                if profile["name"].casefold() == key:
+                    deleted_name = profile["name"]
+                    del self._profiles[index]
+                    self._save_unlocked()
+                    return deleted_name
+        raise KeyError(normalized_name)
+
+    def _save_unlocked(self) -> None:
+        try:
+            temporary_path = self._path.with_suffix(".tmp")
+            temporary_path.write_text(
+                json.dumps({"profiles": self._profiles}, indent=2, ensure_ascii=True),
+                encoding="utf-8",
+            )
+            os.replace(temporary_path, self._path)
+        except OSError as error:
+            print(f"Warning: lens profiles could not be saved: {error}", file=sys.stderr)
 
 
 @dataclass(frozen=True)
@@ -1095,12 +1209,14 @@ class LensCastHTTPServer(ThreadingHTTPServer):
         self,
         address: tuple[str, int],
         settings: SettingsStore,
+        lens_profiles: LensProfileStore,
         capture: DesktopCapture,
         displays: DisplayCatalog,
         viewers: ViewerRegistry,
     ) -> None:
         super().__init__(address, LensCastRequestHandler)
         self.settings = settings
+        self.lens_profiles = lens_profiles
         self.capture = capture
         self.displays = displays
         self.viewers = viewers
@@ -1126,6 +1242,8 @@ class LensCastRequestHandler(BaseHTTPRequestHandler):
             self._serve_static("phone.html")
         elif path == "/api/settings":
             self._json_response(self.server.settings.get())
+        elif path == "/api/lens-profiles":
+            self._json_response({"profiles": self.server.lens_profiles.get()})
         elif path == "/api/status":
             self._json_response(self._status_payload())
         elif path == "/api/displays":
@@ -1146,14 +1264,56 @@ class LensCastRequestHandler(BaseHTTPRequestHandler):
             if payload is None:
                 return
             self._json_response(self.server.settings.update(payload))
+        elif path == "/api/lens-profiles":
+            payload = self._read_json_body()
+            if payload is None:
+                return
+            if not isinstance(payload, dict):
+                self.send_error(HTTPStatus.BAD_REQUEST, "Data profil lensa tidak valid.")
+                return
+            try:
+                profile, created = self.server.lens_profiles.save(
+                    payload.get("name"), payload.get("headset")
+                )
+            except ValueError as error:
+                self.send_error(HTTPStatus.BAD_REQUEST, str(error))
+                return
+            self._json_response(
+                {
+                    "profiles": self.server.lens_profiles.get(),
+                    "saved": profile["name"],
+                    "created": created,
+                }
+            )
         elif path == "/api/reset":
             self._json_response(self.server.settings.reset())
         else:
             self.send_error(HTTPStatus.NOT_FOUND, "Route not found")
 
+    def do_DELETE(self) -> None:  # noqa: N802
+        request = urlparse(self.path)
+        if request.path != "/api/lens-profiles":
+            self.send_error(HTTPStatus.NOT_FOUND, "Route not found")
+            return
+        names = parse_qs(request.query).get("name", [])
+        if len(names) != 1:
+            self.send_error(HTTPStatus.BAD_REQUEST, "Pilih profil lensa yang akan dihapus.")
+            return
+        try:
+            deleted_name = self.server.lens_profiles.delete(names[0])
+        except ValueError as error:
+            self.send_error(HTTPStatus.BAD_REQUEST, str(error))
+            return
+        except KeyError:
+            self.send_error(HTTPStatus.NOT_FOUND, "Profil lensa tidak ditemukan.")
+            return
+        self._json_response(
+            {"profiles": self.server.lens_profiles.get(), "deleted": deleted_name}
+        )
+
     def do_OPTIONS(self) -> None:  # noqa: N802
         self.send_response(HTTPStatus.NO_CONTENT)
-        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Content-Type")
         self.end_headers()
 
@@ -1283,12 +1443,20 @@ def main() -> int:
 
     configure_dpi_awareness()
     settings = SettingsStore()
+    lens_profiles = LensProfileStore()
     displays = DisplayCatalog()
     viewers = ViewerRegistry()
     capture = DesktopCapture(settings, displays)
     capture.start()
     try:
-        server = LensCastHTTPServer((args.host, args.port), settings, capture, displays, viewers)
+        server = LensCastHTTPServer(
+            (args.host, args.port),
+            settings,
+            lens_profiles,
+            capture,
+            displays,
+            viewers,
+        )
     except OSError as error:
         capture.stop()
         print(f"Could not start LensCast on port {args.port}: {error}", file=sys.stderr)

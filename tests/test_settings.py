@@ -1,7 +1,9 @@
 import io
 import os
 import subprocess
+import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 import numpy as np
@@ -9,6 +11,7 @@ from PIL import Image
 
 from app import (
     DEFAULT_SETTINGS,
+    LensProfileStore,
     ViewerRegistry,
     adb_connected_serials,
     crop_image_to_display,
@@ -64,6 +67,30 @@ locked\tunauthorized usb:1-4
     def test_native_resolution_requires_a_boolean(self):
         self.assertFalse(sanitize_settings({"headset": {"nativeResolution": 1}})["headset"]["nativeResolution"])
         self.assertTrue(sanitize_settings({"headset": {"nativeResolution": True}})["headset"]["nativeResolution"])
+
+    def test_lens_profiles_round_trip_and_replace_by_name(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            path = Path(temporary_directory) / "lens-profiles.json"
+            store = LensProfileStore(path)
+            saved, created = store.save(
+                "VR Box Sofa",
+                {"eyeWidth": 86, "barrel": 0.18, "nativeResolution": True},
+            )
+            self.assertTrue(created)
+            self.assertEqual(saved["name"], "VR Box Sofa")
+            self.assertEqual(saved["headset"]["eyeWidth"], 86)
+            self.assertTrue(saved["headset"]["nativeResolution"])
+
+            updated, created = store.save("vr box sofa", {"eyeWidth": 91})
+            self.assertFalse(created)
+            self.assertEqual(updated["name"], "VR Box Sofa")
+            self.assertEqual(updated["headset"]["eyeWidth"], 91)
+            self.assertEqual(len(store.get()), 1)
+
+            restored = LensProfileStore(path).get()
+            self.assertEqual(restored, store.get())
+            self.assertEqual(store.delete("VR BOX SOFA"), "VR Box Sofa")
+            self.assertEqual(store.get(), [])
 
     def test_display_id_accepts_windows_display_names_only(self):
         display_id = chr(92) * 2 + "." + chr(92) + "DISPLAY3"
