@@ -5,9 +5,10 @@ phone VR Box. It mirrors the desktop to a phone over a local USB tunnel, duplica
 the image into left/right eye views, and exposes manual calibration for different
 VR Box and full-screen phone layouts.
 
-The server uses MJPEG so it can run without Node, Android Studio, or a native
-phone install. It binds to `127.0.0.1` by default; the phone interface is a web
-app at /phone delivered through the USB ADB tunnel.
+The server keeps MJPEG for the Studio preview and uses a demand-driven latest
+JPEG frame route for the phone, so the WebView drops stale frames instead of
+building an MJPEG decode queue. It binds to `127.0.0.1` by default; the phone
+interface is a web app at /phone delivered through the USB ADB tunnel.
 
 ## What is included
 
@@ -27,6 +28,10 @@ app at /phone delivered through the USB ADB tunnel.
 - Named lens profiles saved locally on the PC, so separate VR Box calibrations can
   be saved, loaded, updated, or deleted without changing capture settings.
 - Phone rendering through WebGL for two eye regions and lens distortion.
+- Low-latency phone delivery: one fresh JPEG is decoded at a time, while stale
+  frames are deliberately skipped when the phone cannot keep up.
+- Optional high-contrast PC cursor overlay for DXGI/GDI captures that omit the
+  Windows pointer.
 - Optional native-sharpness mode that renders the phone canvas up to DPR 3 for
   compatible 1080x2400 displays; it uses more phone GPU power than the default DPR 2 mode.
 - A Canvas fallback for phones/browsers without WebGL.
@@ -144,10 +149,12 @@ its graphics menu. Keep the game's aspect ratio at 16:9: LensCast duplicates tha
 one image into both eyes and adds black bars automatically when the VR Box lens
 area is closer to a square.
 
-For the lowest practical latency, use a dedicated 5 GHz/6 GHz Wi-Fi connection
-with the PC wired to the router if possible. This transport is designed for a
-virtual cinema view, so a regular game is shown identically to both eyes; it does
-not add true 3D depth or headset tracking.
+For the lowest practical latency, prefer the direct ADB USB tunnel. The phone
+now requests only the newest completed frame, so it skips stale JPEGs rather
+than displaying them late. A stable `40-50 fps` with JPEG quality around `50-65`
+can feel more responsive than a congested 60 fps/very-high-quality stream. This
+transport is designed for a virtual cinema view, so a regular game is shown
+identically to both eyes; it does not add true 3D depth or headset tracking.
 
 Once the `CAPTURE` readout stays at its target, raise Frame rate toward 60 before
 raising stream resolution. Use `960x540` when Wi-Fi is the limit, then try
@@ -164,6 +171,7 @@ on some Windows/GPU combinations.
 | Potong desktop | Chooses which part of the PC screen is mirrored. |
 | Cara isi frame mata | `Pas` preserves the source with black bars; `Penuhi` crops; `Regang` changes aspect ratio. |
 | Ukuran frame | Sets the stable encoded stream frame without changing the game's render resolution. |
+| Tampilkan kursor PC | Draws a visible pointer into the captured frame when Windows/DXGI does not include it. |
 | Lebar/Tinggi layar | Shrinks the active rectangle inside each physical half-screen. |
 | Jarak antar mata | Moves the active rectangles apart to match the lens centers. |
 | Offset horizontal | Moves the content outward or inward per eye. |

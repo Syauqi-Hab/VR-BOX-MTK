@@ -207,7 +207,8 @@
       label.textContent = width + " x " + height;
     }
     if (note) {
-      note.textContent = "" + width + " x " + height + " (" + pixels.toFixed(2) + " MP). Satu frame 16:9 digandakan oleh GPU HP.";
+      note.textContent = "" + width + " x " + height + " (" + pixels.toFixed(2) +
+        " MP). HP meminta frame terbaru saja, lalu GPU menggandakannya ke dua mata.";
     }
   }
 

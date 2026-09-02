@@ -54,6 +54,7 @@ LENS_PROFILES_PATH = Path(
     )
 )
 BOUNDARY = "lenscast-frame"
+LATEST_FRAME_VIEWER_TTL_SECONDS = 4.0
 DISPLAY_ID_PATTERN = re.compile(r"^\\\\\.\\DISPLAY\d+$", re.IGNORECASE)
 CAPTURE_BACKENDS = {"auto", "dxgi", "pillow"}
 SOURCE_FIT_MODES = {"contain", "cover", "stretch"}
@@ -69,9 +70,10 @@ DEFAULT_SETTINGS: dict[str, dict[str, Any]] = {
     "capture": {
         "display": "all",
         "backend": "auto",
-        "fps": 36,
+        "fps": 50,
         "quality": 58,
         "scale": 0.5,  # Legacy setting retained for existing settings files.
+        "cursor": True,
         "paused": False,
     },
     "stream": {
@@ -152,6 +154,7 @@ def sanitize_settings(candidate: Any) -> dict[str, dict[str, Any]]:
                     result[group][key] = raw_value
                 continue
             if (group, key) in {
+                ("capture", "cursor"),
                 ("capture", "paused"),
                 ("headset", "nativeResolution"),
             }:
@@ -364,6 +367,14 @@ def is_raw_dxgi_frame(image: Any) -> bool:
     return HAS_OPENCV and isinstance(image, np.ndarray)
 
 
+def image_dimensions(image: Image.Image | Any) -> tuple[int, int]:
+    """Return image dimensions without converting a raw DXGI frame."""
+    if is_raw_dxgi_frame(image):
+        height, width = image.shape[:2]
+        return int(width), int(height)
+    return image.size
+
+
 def fit_image_to_stream(
     image: Image.Image | Any,
     width: int,
@@ -416,6 +427,103 @@ def fit_image_to_stream(
     frame = Image.new("RGB", (width, height), "black")
     frame.paste(image, ((width - image.width) // 2, (height - image.height) // 2))
     return frame
+
+
+def windows_cursor_position() -> tuple[int, int] | None:
+    """Read the Windows pointer position in physical desktop pixels."""
+    if os.name != "nt":
+        return None
+    try:
+        import ctypes
+
+        class Point(ctypes.Structure):
+            _fields_ = [("x", ctypes.c_long), ("y", ctypes.c_long)]
+
+        position = Point()
+        user32 = ctypes.windll.user32
+        user32.GetCursorPos.argtypes = [ctypes.POINTER(Point)]
+        user32.GetCursorPos.restype = ctypes.c_int
+        if not user32.GetCursorPos(ctypes.byref(position)):
+            return None
+        return int(position.x), int(position.y)
+    except Exception:
+        return None
+
+
+def project_cursor_to_stream(
+    cursor_position: tuple[int, int] | None,
+    selected_display: dict[str, Any],
+    source_size: tuple[int, int],
+    stream_size: tuple[int, int],
+) -> tuple[int, int] | None:
+    """Map a Windows cursor point into the letterboxed encoded stream frame."""
+    if cursor_position is None:
+        return None
+    try:
+        display_left = int(selected_display["x"])
+        display_top = int(selected_display["y"])
+        display_width = int(selected_display["width"])
+        display_height = int(selected_display["height"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    source_width, source_height = source_size
+    stream_width, stream_height = stream_size
+    if min(display_width, display_height, source_width, source_height, stream_width, stream_height) < 1:
+        return None
+
+    relative_x = cursor_position[0] - display_left
+    relative_y = cursor_position[1] - display_top
+    if not (0 <= relative_x < display_width and 0 <= relative_y < display_height):
+        return None
+
+    source_x = relative_x * source_width / display_width
+    source_y = relative_y * source_height / display_height
+    scale = min(stream_width / source_width, stream_height / source_height)
+    rendered_width = max(1, round(source_width * scale))
+    rendered_height = max(1, round(source_height * scale))
+    left = (stream_width - rendered_width) // 2
+    top = (stream_height - rendered_height) // 2
+    return (
+        min(stream_width - 1, max(0, left + round(source_x * scale))),
+        min(stream_height - 1, max(0, top + round(source_y * scale))),
+    )
+
+
+def overlay_cursor_marker(
+    image: Image.Image | Any,
+    cursor_position: tuple[int, int] | None,
+) -> Image.Image | Any:
+    """Draw a high-contrast pointer so DXGI/GDI captures include the mouse."""
+    if cursor_position is None:
+        return image
+    width, height = image_dimensions(image)
+    x, y = cursor_position
+    marker_size = max(16, min(50, round(min(width, height) * 0.055)))
+    if x < -marker_size or y < -marker_size or x >= width or y >= height:
+        return image
+
+    points = [
+        (x, y),
+        (x, y + marker_size),
+        (x + round(marker_size * 0.25), y + round(marker_size * 0.72)),
+        (x + round(marker_size * 0.46), y + marker_size),
+        (x + round(marker_size * 0.64), y + round(marker_size * 0.87)),
+        (x + round(marker_size * 0.41), y + round(marker_size * 0.58)),
+        (x + round(marker_size * 0.80), y + round(marker_size * 0.58)),
+    ]
+    outline_width = max(2, round(marker_size * 0.1))
+    if is_raw_dxgi_frame(image):
+        if not image.flags.writeable:
+            image = image.copy()
+        vertices = np.array(points, dtype=np.int32).reshape((-1, 1, 2))
+        cv2.fillPoly(image, [vertices], color=(250, 250, 250), lineType=cv2.LINE_AA)
+        cv2.polylines(image, [vertices], True, color=(0, 0, 0), thickness=outline_width, lineType=cv2.LINE_AA)
+        return image
+
+    draw = ImageDraw.Draw(image)
+    draw.polygon(points, fill=(250, 250, 250))
+    draw.line([*points, points[0]], fill=(0, 0, 0), width=outline_width)
+    return image
 
 
 def encode_stream_frame(image: Image.Image | Any, quality: int) -> bytes:
@@ -968,6 +1076,7 @@ class DesktopCapture:
                 continue
 
             try:
+                captured_at = time.monotonic()
                 frame_started_at = time.perf_counter()
                 (
                     image,
@@ -978,11 +1087,24 @@ class DesktopCapture:
                 ) = self._capture_image(capture_settings)
                 capture_finished_at = time.perf_counter()
                 raw_dxgi_frame = is_raw_dxgi_frame(image)
+                source_size = image_dimensions(image)
+                cursor_position = (
+                    windows_cursor_position() if capture_settings["cursor"] else None
+                )
                 image = fit_image_to_stream(
                     image,
                     stream_settings["width"],
                     stream_settings["height"],
                     preserve_raw=raw_dxgi_frame,
+                )
+                image = overlay_cursor_marker(
+                    image,
+                    project_cursor_to_stream(
+                        cursor_position,
+                        selected_display,
+                        source_size,
+                        (stream_settings["width"], stream_settings["height"]),
+                    ),
                 )
                 resize_finished_at = time.perf_counter()
                 if is_raw_dxgi_frame(image):
@@ -1006,7 +1128,7 @@ class DesktopCapture:
                         encoded_frame,
                         image_width,
                         image_height,
-                        now,
+                        captured_at,
                     )
                     self._error = ""
                     self._target_id = selected_display["id"]
@@ -1076,11 +1198,12 @@ def local_ipv4_addresses() -> list[str]:
 
 
 class ViewerRegistry:
-    """Tracks active MJPEG readers so Studio can report headset connectivity."""
+    """Tracks stream readers and short-poll latest-frame clients for Studio status."""
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._counts = {"studio": 0, "phone": 0, "other": 0}
+        self._last_seen: dict[str, float] = {}
 
     def connect(self, requested_role: str) -> str:
         role = requested_role if requested_role in self._counts else "other"
@@ -1092,9 +1215,23 @@ class ViewerRegistry:
         with self._lock:
             self._counts[role] = max(0, self._counts.get(role, 0) - 1)
 
+    def heartbeat(self, requested_role: str) -> str:
+        """Keep a latest-frame client visible while it long-polls for fresh JPEGs."""
+        role = requested_role if requested_role in self._counts else "other"
+        with self._lock:
+            self._last_seen[role] = time.monotonic()
+        return role
+
     def snapshot(self) -> dict[str, int]:
         with self._lock:
-            return dict(self._counts)
+            snapshot = dict(self._counts)
+            cutoff = time.monotonic() - LATEST_FRAME_VIEWER_TTL_SECONDS
+            for role, seen_at in tuple(self._last_seen.items()):
+                if seen_at < cutoff:
+                    del self._last_seen[role]
+                else:
+                    snapshot[role] = max(snapshot[role], 1)
+            return snapshot
 
 
 def adb_connected_serials(output: str) -> list[str]:
@@ -1228,7 +1365,7 @@ class LensCastRequestHandler(BaseHTTPRequestHandler):
 
     def log_message(self, format_string: str, *args: Any) -> None:
         # Keep the console useful while still exposing request failures.
-        if self.command != "GET" or not self.path.startswith("/stream.mjpg"):
+        if self.command != "GET" or not self.path.startswith(("/stream.mjpg", "/frame.jpg")):
             print(f"[{self.log_date_time_string()}] {format_string % args}")
 
     def do_GET(self) -> None:  # noqa: N802
@@ -1250,6 +1387,8 @@ class LensCastRequestHandler(BaseHTTPRequestHandler):
             self._json_response({"displays": self.server.displays.get(force_refresh=True)})
         elif path == "/api/health":
             self._json_response({"ok": True})
+        elif path == "/frame.jpg":
+            self._serve_latest_frame(request.query)
         elif path == "/stream.mjpg":
             self._serve_mjpeg(request.query)
         elif path.startswith("/assets/"):
@@ -1383,14 +1522,54 @@ class LensCastRequestHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def _serve_mjpeg(self, query: str) -> None:
+    def _configure_stream_socket(self, send_buffer_bytes: int) -> None:
         try:
-            # Keep a slow Wi-Fi reader close to the newest frame instead of accumulating seconds of JPEGs.
+            # Bound in-flight data. Latest-frame delivery cannot queue a second JPEG by design.
             self.connection.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-            self.connection.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 256 * 1024)
+            self.connection.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, send_buffer_bytes)
             self.connection.settimeout(2.0)
         except OSError:
             pass
+
+    @staticmethod
+    def _after_sequence(query: str) -> int:
+        raw_value = parse_qs(query).get("after", ["-1"])[0]
+        try:
+            return max(-1, min(int(raw_value), 2_147_483_647))
+        except (TypeError, ValueError):
+            return -1
+
+    def _serve_latest_frame(self, query: str) -> None:
+        """Return one fresh JPEG, waiting briefly instead of letting the client queue MJPEG parts."""
+        self._configure_stream_socket(256 * 1024)
+        requested_role = parse_qs(query).get("role", ["other"])[0]
+        after_sequence = self._after_sequence(query)
+        frame = self.server.capture.get_after(after_sequence, timeout=1.2)
+        self.server.viewers.heartbeat(requested_role)
+        if frame.sequence <= after_sequence:
+            self.send_response(HTTPStatus.NO_CONTENT)
+            self.send_header("Cache-Control", "no-store, no-cache, must-revalidate")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
+
+        frame_age_ms = max(0, round((time.monotonic() - frame.captured_at) * 1000))
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", "image/jpeg")
+        self.send_header("Content-Length", str(len(frame.jpeg)))
+        self.send_header("Cache-Control", "no-store, no-cache, must-revalidate")
+        self.send_header("Pragma", "no-cache")
+        self.send_header("X-LensCast-Sequence", str(frame.sequence))
+        self.send_header("X-LensCast-Frame-Age-Ms", str(frame_age_ms))
+        self.end_headers()
+        try:
+            self.wfile.write(frame.jpeg)
+            self.wfile.flush()
+        except OSError:
+            pass
+
+    def _serve_mjpeg(self, query: str) -> None:
+        self._configure_stream_socket(64 * 1024)
         self.send_response(HTTPStatus.OK)
         self.send_header("Content-Type", f"multipart/x-mixed-replace; boundary={BOUNDARY}")
         self.send_header("Cache-Control", "no-store, no-cache, must-revalidate")

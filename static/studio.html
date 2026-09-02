@@ -118,7 +118,15 @@
             <b>Ultra 1080p</b><small>1920 x 1080</small>
           </button>
         </div>
-        <p class="control-note" id="streamMeta">Frame dikirim satu kali, lalu digandakan oleh GPU HP.</p>
+        <p class="control-note" id="streamMeta">HP meminta frame terbaru saja, lalu GPU menggandakannya ke dua mata.</p>
+        <label class="switch-control">
+          <span>
+            <b>Tampilkan kursor PC</b>
+            <small>Tambahkan pointer kontras tinggi ke capture bila DXGI atau game menyembunyikan cursor Windows.</small>
+          </span>
+          <input id="showCaptureCursor" data-path="capture.cursor" type="checkbox">
+          <i aria-hidden="true"></i>
+        </label>
         <label class="switch-control">
           <span>
             <b>Jeda capture</b>

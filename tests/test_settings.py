@@ -1,7 +1,10 @@
+import http.client
 import io
 import os
 import subprocess
 import tempfile
+import threading
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -11,6 +14,8 @@ from PIL import Image
 
 from app import (
     DEFAULT_SETTINGS,
+    Frame,
+    LensCastHTTPServer,
     LensProfileStore,
     ViewerRegistry,
     adb_connected_serials,
@@ -19,7 +24,9 @@ from app import (
     encode_stream_frame,
     fit_image_to_stream,
     hidden_subprocess_kwargs,
+    overlay_cursor_marker,
     parse_arguments,
+    project_cursor_to_stream,
     sanitize_settings,
 )
 
@@ -63,6 +70,10 @@ locked\tunauthorized usb:1-4
     def test_pause_requires_a_boolean(self):
         self.assertFalse(sanitize_settings({"capture": {"paused": 1}})["capture"]["paused"])
         self.assertTrue(sanitize_settings({"capture": {"paused": True}})["capture"]["paused"])
+
+    def test_cursor_capture_requires_a_boolean(self):
+        self.assertTrue(sanitize_settings({"capture": {"cursor": 0}})["capture"]["cursor"])
+        self.assertFalse(sanitize_settings({"capture": {"cursor": False}})["capture"]["cursor"])
 
     def test_native_resolution_requires_a_boolean(self):
         self.assertFalse(sanitize_settings({"headset": {"nativeResolution": 1}})["headset"]["nativeResolution"])
@@ -165,6 +176,23 @@ locked\tunauthorized usb:1-4
         self.assertEqual(cropped.size, (100, 100))
         self.assertEqual(cropped.getpixel((0, 0)), (0, 0, 255))
 
+    def test_cursor_projects_into_a_letterboxed_stream(self):
+        display = {"x": -100, "y": 0, "width": 200, "height": 100}
+        self.assertEqual(
+            project_cursor_to_stream((0, 50), display, (200, 100), (100, 100)),
+            (50, 50),
+        )
+        self.assertIsNone(
+            project_cursor_to_stream((-101, 50), display, (200, 100), (100, 100))
+        )
+
+    def test_cursor_overlay_marks_pillow_and_dxgi_frames(self):
+        pillow_frame = Image.new("RGB", (100, 100), "black")
+        self.assertIsNotNone(overlay_cursor_marker(pillow_frame, (20, 20)).getbbox())
+
+        dxgi_frame = np.zeros((100, 100, 3), dtype=np.uint8)
+        self.assertTrue(np.any(overlay_cursor_marker(dxgi_frame, (20, 20))))
+
     def test_viewer_registry_tracks_phone_connections_safely(self):
         viewers = ViewerRegistry()
         phone_role = viewers.connect("phone")
@@ -174,6 +202,48 @@ locked\tunauthorized usb:1-4
         viewers.disconnect(phone_role)
         viewers.disconnect(studio_role)
         self.assertEqual(viewers.snapshot(), {"studio": 0, "phone": 0, "other": 0})
+
+    def test_viewer_registry_keeps_latest_frame_phone_visible(self):
+        viewers = ViewerRegistry()
+        viewers.heartbeat("phone")
+        self.assertEqual(viewers.snapshot()["phone"], 1)
+
+    def test_latest_frame_route_returns_only_new_frames_on_one_connection(self):
+        class StaticCapture:
+            frame = Frame(5, b"test-jpeg", 320, 180, time.monotonic())
+
+            def get_after(self, _sequence, timeout=4.0):
+                return self.frame
+
+        viewers = ViewerRegistry()
+        server = LensCastHTTPServer(
+            ("127.0.0.1", 0),
+            object(),
+            object(),
+            StaticCapture(),
+            object(),
+            viewers,
+        )
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        connection = http.client.HTTPConnection("127.0.0.1", server.server_address[1], timeout=2)
+        try:
+            connection.request("GET", "/frame.jpg?role=phone&after=-1")
+            first = connection.getresponse()
+            self.assertEqual(first.status, 200)
+            self.assertEqual(first.read(), b"test-jpeg")
+            self.assertEqual(first.getheader("X-LensCast-Sequence"), "5")
+            self.assertEqual(viewers.snapshot()["phone"], 1)
+
+            connection.request("GET", "/frame.jpg?role=phone&after=5")
+            second = connection.getresponse()
+            self.assertEqual(second.status, 204)
+            self.assertEqual(second.read(), b"")
+        finally:
+            connection.close()
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
 
     def test_dxgi_output_mapping_requires_one_monitor_for_virtual_desktop(self):
         display_one = {"id": "display-1"}

@@ -6,6 +6,15 @@
   var saveTimer = null;
   var retryTimer = null;
   var pollingTimer = null;
+  var statusTimer = null;
+  var frameRequestController = null;
+  var frameRequestRunning = false;
+  var frameTransportStopped = false;
+  var frameSequence = -1;
+  var currentFrame = null;
+  var currentFrameRevision = 0;
+  var latestFrameAgeMs = null;
+  var usingMjpegFallback = false;
   var lastLocalChange = 0;
   var wakeLock = null;
 
@@ -105,6 +114,80 @@
       }
       return response.json();
     });
+  }
+
+  function nowMilliseconds() {
+    return window.performance && window.performance.now ? window.performance.now() : Date.now();
+  }
+
+  function frameSourceWidth(source) {
+    return Number(source && (source.naturalWidth || source.width) || 0);
+  }
+
+  function frameSourceHeight(source) {
+    return Number(source && (source.naturalHeight || source.height) || 0);
+  }
+
+  function closeFrameSource(source) {
+    if (source && typeof source.close === "function") {
+      try {
+        source.close();
+      } catch (error) {
+        // A source can already be closed after a WebGL context reset.
+      }
+    }
+  }
+
+  function setCurrentFrame(source, sequence, ageMs) {
+    var width = frameSourceWidth(source);
+    var height = frameSourceHeight(source);
+    if (!width || !height) {
+      closeFrameSource(source);
+      return false;
+    }
+    if (currentFrame && currentFrame.source !== source) {
+      closeFrameSource(currentFrame.source);
+    }
+    currentFrameRevision += 1;
+    currentFrame = {
+      source: source,
+      width: width,
+      height: height,
+      sequence: sequence,
+      revision: currentFrameRevision
+    };
+    latestFrameAgeMs = Number.isFinite(ageMs) ? Math.max(0, Math.round(ageMs)) : null;
+    return true;
+  }
+
+  function decodeFrameBlob(blob) {
+    if (typeof window.createImageBitmap === "function") {
+      return window.createImageBitmap(blob);
+    }
+    return new Promise(function (resolve, reject) {
+      if (!window.URL || !window.URL.createObjectURL) {
+        reject(new Error("Browser tidak mendukung decode frame rendah-latensi."));
+        return;
+      }
+      var objectUrl = window.URL.createObjectURL(blob);
+      var image = new Image();
+      image.onload = function () {
+        window.URL.revokeObjectURL(objectUrl);
+        resolve(image);
+      };
+      image.onerror = function () {
+        window.URL.revokeObjectURL(objectUrl);
+        reject(new Error("JPEG frame tidak dapat didecode."));
+      };
+      image.src = objectUrl;
+    });
+  }
+
+  function supportsLatestFrameTransport() {
+    return typeof window.fetch === "function" && (
+      typeof window.createImageBitmap === "function" ||
+      Boolean(window.URL && window.URL.createObjectURL)
+    );
   }
 
   function numberFormat(value, control) {
@@ -214,7 +297,9 @@
     var gl = canvas.getContext("webgl", {
       alpha: false,
       antialias: false,
-      powerPreference: "high-performance"
+      desynchronized: true,
+      powerPreference: "high-performance",
+      preserveDrawingBuffer: false
     });
     if (!gl) {
       return null;
@@ -242,6 +327,7 @@
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
       gl.texImage2D(
         gl.TEXTURE_2D,
         0,
@@ -269,7 +355,8 @@
         curvature: gl.getUniformLocation(program, "uCurvature"),
         brightness: gl.getUniformLocation(program, "uBrightness")
       };
-      var lastTextureUploadAt = 0;
+      var uploadedFrameRevision = -1;
+      var lastLegacyTextureUploadAt = 0;
 
       function resize() {
         var ratio = renderPixelRatio();
@@ -290,16 +377,19 @@
         gl.vertexAttribPointer(position, 2, gl.FLOAT, false, 0, 0);
         gl.activeTexture(gl.TEXTURE0);
         gl.bindTexture(gl.TEXTURE_2D, texture);
+        var frame = currentFrame;
+        var now = nowMilliseconds();
         var captureFps = settings && settings.capture ? Number(settings.capture.fps) : 30;
-        var uploadInterval = 1000 / Math.max(5, Math.min(60, captureFps || 30));
-        var now = window.performance && window.performance.now ? window.performance.now() : Date.now();
-        if (streamImage.naturalWidth > 0 && now - lastTextureUploadAt >= uploadInterval) {
+        var legacyUploadInterval = 1000 / Math.max(5, Math.min(60, captureFps || 30));
+        var legacyFrameNeedsUpload = usingMjpegFallback && frame &&
+          now - lastLegacyTextureUploadAt >= legacyUploadInterval;
+        if (frame && (frame.revision !== uploadedFrameRevision || legacyFrameNeedsUpload)) {
           try {
-            gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
-            gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, streamImage);
-            lastTextureUploadAt = now;
+            gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, frame.source);
+            uploadedFrameRevision = frame.revision;
+            lastLegacyTextureUploadAt = now;
           } catch (error) {
-            // Browsers can reject a frame while the MJPEG image is being replaced.
+            // The next animation frame retries if a browser replaces the fallback image mid-upload.
           }
         }
         var source = settings ? settings.source : { cropX: 0, cropY: 0, cropWidth: 100, cropHeight: 100 };
@@ -308,8 +398,8 @@
           zoom: 1, barrel: 0.12, curvature: 0.08, brightness: 1
         };
         var stream = settings && settings.stream ? settings.stream : { width: 16, height: 9 };
-        var sourceWidth = streamImage.naturalWidth || stream.width;
-        var sourceHeight = streamImage.naturalHeight || stream.height;
+        var sourceWidth = frame ? frame.width : stream.width;
+        var sourceHeight = frame ? frame.height : stream.height;
         var sourceAspect = (sourceWidth * source.cropWidth) /
           Math.max(1, sourceHeight * source.cropHeight);
         var eyeAspect = (canvas.width * headset.eyeWidth) /
@@ -333,6 +423,7 @@
         gl.uniform1f(uniforms.curvature, headset.curvature);
         gl.uniform1f(uniforms.brightness, headset.brightness);
         gl.drawArrays(gl.TRIANGLES, 0, 6);
+        gl.flush();
       }
 
       return { render: render };
@@ -345,15 +436,15 @@
   function createCanvasFallback() {
     var context = canvas.getContext("2d");
 
-    function drawEye(image, crop, x, y, width, height, eyeSign, headset, fit) {
+    function drawEye(image, sourceWidth, sourceHeight, crop, x, y, width, height, eyeSign, headset, fit) {
       context.save();
       context.beginPath();
       context.rect(x, y, width, height);
       context.clip();
-      var cropWidth = image.naturalWidth * crop.cropWidth / 100;
-      var cropHeight = image.naturalHeight * crop.cropHeight / 100;
-      var cropX = image.naturalWidth * crop.cropX / 100;
-      var cropY = image.naturalHeight * crop.cropY / 100;
+      var cropWidth = sourceWidth * crop.cropWidth / 100;
+      var cropHeight = sourceHeight * crop.cropHeight / 100;
+      var cropX = sourceWidth * crop.cropX / 100;
+      var cropY = sourceHeight * crop.cropY / 100;
       var imageWidth;
       var imageHeight;
       if (fit === "stretch") {
@@ -392,7 +483,8 @@
       }
       context.fillStyle = "#000";
       context.fillRect(0, 0, width, height);
-      if (!streamImage.naturalWidth || !settings) {
+      var frame = currentFrame;
+      if (!frame || !settings) {
         return;
       }
       var headset = settings.headset;
@@ -402,7 +494,9 @@
       var gap = cellWidth * headset.eyeGap / 100;
       var y = (height - frameHeight) / 2;
       drawEye(
-        streamImage,
+        frame.source,
+        frame.width,
+        frame.height,
         settings.source,
         (cellWidth - frameWidth) / 2 - gap / 2,
         y,
@@ -413,7 +507,9 @@
         settings.source.fit || "contain"
       );
       drawEye(
-        streamImage,
+        frame.source,
+        frame.width,
+        frame.height,
         settings.source,
         cellWidth + (cellWidth - frameWidth) / 2 + gap / 2,
         y,
@@ -484,12 +580,13 @@
       if (status.capture.error) {
         stateLabel.textContent = "Capture PC error: " + status.capture.error;
       } else if (status.capture.sequence > 0) {
-        stateLabel.textContent = "Desktop live - " + status.capture.measuredFps + " fps";
+        stateLabel.textContent = "Desktop live - " + status.capture.measuredFps + " fps" +
+          (latestFrameAgeMs === null ? "" : " / frame terbaru ~" + latestFrameAgeMs + " ms");
       } else {
         stateLabel.textContent = "Menunggu capture desktop...";
       }
     })["catch"](function () {
-      stateLabel.textContent = "Tidak dapat menjangkau PC. Cek Wi-Fi.";
+      stateLabel.textContent = "Tidak dapat menjangkau PC. Cek USB atau Wi-Fi.";
     });
   }
 
@@ -502,17 +599,98 @@
     })["catch"](function () {});
   }
 
-  function startStream() {
+  function startMjpegFallback() {
+    usingMjpegFallback = true;
     streamImage.onload = function () {
-      updateMobileStatus();
+      frameSequence += 1;
+      setCurrentFrame(streamImage, frameSequence, null);
       window.clearTimeout(retryTimer);
     };
     streamImage.onerror = function () {
       stateLabel.textContent = "Stream terputus, mencoba lagi...";
       window.clearTimeout(retryTimer);
-      retryTimer = window.setTimeout(startStream, 1200);
+      retryTimer = window.setTimeout(startMjpegFallback, 1200);
     };
     streamImage.src = "/stream.mjpg?role=phone&start=" + Date.now();
+  }
+
+  function requestLatestFrame() {
+    if (frameTransportStopped || frameRequestRunning) {
+      return;
+    }
+    frameRequestRunning = true;
+    var controller = typeof window.AbortController === "function" ? new window.AbortController() : null;
+    frameRequestController = controller;
+    var requestOptions = { cache: "no-store" };
+    if (controller) {
+      requestOptions.signal = controller.signal;
+    }
+    var responseReceivedAt = 0;
+    window.fetch(
+      "/frame.jpg?role=phone&after=" + encodeURIComponent(frameSequence),
+      requestOptions
+    ).then(function (response) {
+      responseReceivedAt = nowMilliseconds();
+      if (response.status === 204) {
+        return null;
+      }
+      if (!response.ok) {
+        throw new Error("HTTP " + response.status);
+      }
+      var sequence = Number(response.headers.get("X-LensCast-Sequence"));
+      if (!Number.isFinite(sequence)) {
+        sequence = frameSequence + 1;
+      }
+      var serverAgeMs = Number(response.headers.get("X-LensCast-Frame-Age-Ms"));
+      if (!Number.isFinite(serverAgeMs)) {
+        serverAgeMs = 0;
+      }
+      return response.blob().then(function (blob) {
+        return decodeFrameBlob(blob);
+      }).then(function (source) {
+        return {
+          source: source,
+          sequence: sequence,
+          ageMs: serverAgeMs + Math.max(0, nowMilliseconds() - responseReceivedAt)
+        };
+      });
+    }).then(function (frame) {
+      frameRequestRunning = false;
+      frameRequestController = null;
+      if (frame) {
+        if (frame.sequence > frameSequence) {
+          if (setCurrentFrame(frame.source, frame.sequence, frame.ageMs)) {
+            frameSequence = frame.sequence;
+            window.clearTimeout(retryTimer);
+          }
+        } else {
+          closeFrameSource(frame.source);
+        }
+      }
+      if (!frameTransportStopped) {
+        requestLatestFrame();
+      }
+    })["catch"](function (error) {
+      frameRequestRunning = false;
+      frameRequestController = null;
+      if (frameTransportStopped || (error && error.name === "AbortError")) {
+        return;
+      }
+      stateLabel.textContent = "Stream terputus, mencoba lagi...";
+      window.clearTimeout(retryTimer);
+      retryTimer = window.setTimeout(requestLatestFrame, 350);
+    });
+  }
+
+  function startStream() {
+    if (!supportsLatestFrameTransport()) {
+      startMjpegFallback();
+      return;
+    }
+    stateLabel.textContent = "Menghubungkan mode latensi rendah...";
+    usingMjpegFallback = false;
+    frameTransportStopped = false;
+    requestLatestFrame();
   }
 
   function loop() {
@@ -530,7 +708,8 @@
       stateLabel.textContent = "Tidak dapat memuat konfigurasi dari PC";
     });
     startStream();
-    pollingTimer = window.setInterval(pollSettings, 1000);
+    pollingTimer = window.setInterval(pollSettings, 1200);
+    statusTimer = window.setInterval(updateMobileStatus, 2000);
     window.addEventListener("resize", function () {
       updateOrientationNotice();
       updateRenderMeta();
@@ -547,6 +726,15 @@
     window.clearTimeout(saveTimer);
     window.clearTimeout(retryTimer);
     window.clearInterval(pollingTimer);
+    window.clearInterval(statusTimer);
+    frameTransportStopped = true;
+    if (frameRequestController) {
+      frameRequestController.abort();
+    }
+    if (currentFrame) {
+      closeFrameSource(currentFrame.source);
+      currentFrame = null;
+    }
     if (wakeLock) {
       wakeLock.release()["catch"](function () {});
     }
