@@ -100,6 +100,23 @@
           <span>Kualitas JPEG <output data-output="capture.quality"></output></span>
           <input data-path="capture.quality" data-unit="%" type="range" min="30" max="95" step="1">
         </label>
+        <label class="select-control">
+          <span>Detail warna dan teks</span>
+          <select id="chromaSelect" data-path="capture.chroma" aria-label="Pilih detail warna JPEG">
+            <option value="420">4:2:0 cepat - latency minimal</option>
+            <option value="444">4:4:4 tajam - UI dan teks lebih bersih</option>
+          </select>
+        </label>
+        <p class="control-note" id="chromaMeta">4:2:0 memakai bandwidth lebih kecil untuk game yang responsif.</p>
+        <label class="select-control">
+          <span>Area game dari monitor</span>
+          <select id="contentAspectSelect" data-path="stream.contentAspect" aria-label="Pilih rasio area game dari monitor">
+            <option value="native">Asli - seluruh monitor tanpa crop</option>
+            <option value="4:3">4:3 tengah - buang pillarbox game 4:3</option>
+            <option value="5:4">5:4 tengah - lebih penuh untuk lensa kotak</option>
+          </select>
+        </label>
+        <p class="control-note" id="contentAspectMeta">Asli mempertahankan seluruh desktop. Gunakan 4:3/5:4 hanya setelah game memakai rasio yang sama.</p>
         <div class="section-title stream-resolution-title">
           <span>Ukuran frame</span>
           <span class="micro-pill" id="streamResolution">960 x 540</span>
@@ -116,6 +133,21 @@
           </button>
           <button class="preset-button" data-stream-preset="ultra" type="button">
             <b>Ultra 1080p</b><small>1920 x 1080</small>
+          </button>
+        </div>
+        <div class="section-title stream-resolution-title">
+          <span>Frame untuk lensa lebih kotak</span>
+          <span class="micro-pill lime">GAME ASPECT</span>
+        </div>
+        <div class="preset-grid stream-presets">
+          <button class="preset-button" data-stream-preset="fourThree" type="button">
+            <b>4:3 960p</b><small>1280 x 960</small>
+          </button>
+          <button class="preset-button" data-stream-preset="fourThreeUltra" type="button">
+            <b>4:3 1080p</b><small>1440 x 1080</small>
+          </button>
+          <button class="preset-button" data-stream-preset="fiveFourUltra" type="button">
+            <b>5:4 1080p</b><small>1350 x 1080</small>
           </button>
         </div>
         <p class="control-note" id="streamMeta">HP meminta frame terbaru saja, lalu GPU menggandakannya ke dua mata.</p>
@@ -144,13 +176,13 @@
         </div>
         <div class="preset-grid quality-presets">
           <button class="preset-button active" data-quality-preset="latency" type="button">
-            <b>Game 30+</b><small>36 fps / JPEG ringan</small>
+            <b>Responsif</b><small>60 fps / 4:2:0 ringan</small>
           </button>
           <button class="preset-button" data-quality-preset="balanced" type="button">
-            <b>Visual</b><small>30 fps / JPEG sedang</small>
+            <b>Seimbang</b><small>50 fps / JPEG sedang</small>
           </button>
           <button class="preset-button" data-quality-preset="clarity" type="button">
-            <b>Detail</b><small>30 fps / JPEG tinggi</small>
+            <b>Detail UI</b><small>36 fps / 4:4:4 tajam</small>
           </button>
         </div>
       </section>

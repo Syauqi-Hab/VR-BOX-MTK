@@ -19,15 +19,18 @@
   var controls = Array.prototype.slice.call(document.querySelectorAll("[data-path]"));
   var outputNodes = Array.prototype.slice.call(document.querySelectorAll("[data-output]"));
   var qualityPresets = {
-    latency: { fps: 36, quality: 58 },
-    balanced: { fps: 30, quality: 72 },
-    clarity: { fps: 30, quality: 85 }
+    latency: { fps: 60, quality: 52, chroma: "420" },
+    balanced: { fps: 50, quality: 66, chroma: "420" },
+    clarity: { fps: 36, quality: 78, chroma: "444" }
   };
   var streamPresets = {
-    light: { width: 960, height: 540 },
-    game: { width: 1280, height: 720 },
-    sharp: { width: 1600, height: 900 },
-    ultra: { width: 1920, height: 1080 }
+    light: { width: 960, height: 540, contentAspect: "native" },
+    game: { width: 1280, height: 720, contentAspect: "native" },
+    sharp: { width: 1600, height: 900, contentAspect: "native" },
+    ultra: { width: 1920, height: 1080, contentAspect: "native" },
+    fourThree: { width: 1280, height: 960, contentAspect: "4:3" },
+    fourThreeUltra: { width: 1440, height: 1080, contentAspect: "4:3" },
+    fiveFourUltra: { width: 1350, height: 1080, contentAspect: "5:4" }
   };
   var headsetPresets = {
     wide: {
@@ -111,11 +114,16 @@
     updateDisplayMeta();
     updateFitMeta();
     updateStreamMeta();
+    updateChromaMeta();
+    updateContentAspectMeta();
     updateRenderResolutionMeta();
   }
 
   function valuesMatch(actual, expected) {
     return Object.keys(expected).every(function (key) {
+      if (typeof expected[key] === "string" || typeof actual[key] === "string") {
+        return actual[key] === expected[key];
+      }
       return Math.abs(Number(actual[key]) - Number(expected[key])) < 0.005;
     });
   }
@@ -203,13 +211,41 @@
     var width = settings.stream.width;
     var height = settings.stream.height;
     var pixels = width * height / 1000000;
+    var aspect = settings.stream.contentAspect || "native";
+    var aspectLabel = aspect === "native" ? "rasio asli" : "area " + aspect;
     if (label) {
-      label.textContent = width + " x " + height;
+      label.textContent = width + " x " + height + " / " + aspectLabel;
     }
     if (note) {
       note.textContent = "" + width + " x " + height + " (" + pixels.toFixed(2) +
-        " MP). HP meminta frame terbaru saja, lalu GPU menggandakannya ke dua mata.";
+        " MP). HP meminta frame terbaru saja; " + aspectLabel +
+        " diproses sebelum JPEG lalu GPU menggandakannya ke dua mata.";
     }
+  }
+
+  function updateChromaMeta() {
+    var node = document.getElementById("chromaMeta");
+    if (!node || !settings || !settings.capture) {
+      return;
+    }
+    node.textContent = settings.capture.chroma === "444"
+      ? "4:4:4 mempertahankan detail warna pada teks/UI, tetapi JPEG bisa jauh lebih besar dan latency dapat naik."
+      : "4:2:0 memakai bandwidth dan decode lebih kecil, jadi lebih aman untuk latency game.";
+  }
+
+  function updateContentAspectMeta() {
+    var node = document.getElementById("contentAspectMeta");
+    if (!node || !settings || !settings.stream) {
+      return;
+    }
+    var aspect = settings.stream.contentAspect || "native";
+    if (aspect === "native") {
+      node.textContent = "Asli mempertahankan seluruh monitor. Untuk game 16:9, pilih Pas agar UI tidak terpotong.";
+      return;
+    }
+    var examples = aspect === "4:3" ? "1280 x 960 atau 1440 x 1080" : "1280 x 1024 atau 1350 x 1080";
+    node.textContent = "LensCast mengambil area " + aspect + " di tengah sebelum JPEG. Set game ke " +
+      examples + " terlebih dahulu; bila game masih 16:9, sisi UI memang dapat terpotong.";
   }
 
   function updateRenderResolutionMeta() {

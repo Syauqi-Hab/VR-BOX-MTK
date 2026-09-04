@@ -17,6 +17,8 @@
   var usingMjpegFallback = false;
   var lastLocalChange = 0;
   var wakeLock = null;
+  var renderDirty = true;
+  var nextKeepAliveAt = 0;
 
   var canvas = document.getElementById("vrCanvas");
   var streamImage = document.getElementById("phoneStream");
@@ -157,6 +159,7 @@
       revision: currentFrameRevision
     };
     latestFrameAgeMs = Number.isFinite(ageMs) ? Math.max(0, Math.round(ageMs)) : null;
+    renderDirty = true;
     return true;
   }
 
@@ -251,6 +254,7 @@
       output.textContent = numberFormat(getPath(settings, output.dataset.output), control);
     });
     updateRenderMeta();
+    renderDirty = true;
   }
 
   function queueSave() {
@@ -537,6 +541,9 @@
         wakeLock = lock;
       })["catch"](function () {});
     }
+    window.setTimeout(function () {
+      renderDirty = true;
+    }, 120);
   }
 
   function enterVr() {
@@ -693,8 +700,18 @@
     requestLatestFrame();
   }
 
-  function loop() {
-    renderer.render();
+  function loop(timestamp) {
+    var now = Number(timestamp);
+    if (!Number.isFinite(now)) {
+      now = nowMilliseconds();
+    }
+    var captureFps = settings && settings.capture ? Number(settings.capture.fps) : 30;
+    var keepAliveFps = Math.max(15, Math.min(60, captureFps || 30));
+    if (renderer && (renderDirty || now >= nextKeepAliveAt)) {
+      renderer.render();
+      renderDirty = false;
+      nextKeepAliveAt = now + 1000 / keepAliveFps;
+    }
     window.requestAnimationFrame(loop);
   }
 
@@ -713,10 +730,12 @@
     window.addEventListener("resize", function () {
       updateOrientationNotice();
       updateRenderMeta();
+      renderDirty = true;
     });
     window.addEventListener("orientationchange", function () {
       updateOrientationNotice();
       updateRenderMeta();
+      renderDirty = true;
     });
     updateOrientationNotice();
     loop();

@@ -19,6 +19,7 @@ from app import (
     LensProfileStore,
     ViewerRegistry,
     adb_connected_serials,
+    crop_image_to_content_aspect,
     crop_image_to_display,
     dxgi_output_index,
     encode_stream_frame,
@@ -116,6 +117,24 @@ locked\tunauthorized usb:1-4
         invalid = sanitize_settings({"capture": {"backend": "unknown"}})
         self.assertEqual(invalid["capture"]["backend"], "auto")
 
+    def test_chroma_and_content_aspect_accept_known_values_only(self):
+        settings = sanitize_settings(
+            {
+                "capture": {"chroma": "444"},
+                "stream": {"contentAspect": "4:3"},
+            }
+        )
+        self.assertEqual(settings["capture"]["chroma"], "444")
+        self.assertEqual(settings["stream"]["contentAspect"], "4:3")
+        invalid = sanitize_settings(
+            {
+                "capture": {"chroma": "4:2:2"},
+                "stream": {"contentAspect": "square"},
+            }
+        )
+        self.assertEqual(invalid["capture"]["chroma"], "420")
+        self.assertEqual(invalid["stream"]["contentAspect"], "native")
+
     def test_stream_frame_and_fit_mode_are_sanitized(self):
         settings = sanitize_settings(
             {
@@ -123,13 +142,19 @@ locked\tunauthorized usb:1-4
                 "source": {"fit": "cover"},
             }
         )
-        self.assertEqual(settings["stream"], {"width": 1278, "height": 720})
+        self.assertEqual(
+            settings["stream"],
+            {"width": 1278, "height": 720, "contentAspect": "native"},
+        )
         self.assertEqual(settings["source"]["fit"], "cover")
         self.assertEqual(sanitize_settings({"source": {"fit": "invalid"}})["source"]["fit"], "contain")
 
     def test_stream_accepts_full_hd_maximum(self):
         settings = sanitize_settings({"stream": {"width": 1920, "height": 1080}})
-        self.assertEqual(settings["stream"], {"width": 1920, "height": 1080})
+        self.assertEqual(
+            settings["stream"],
+            {"width": 1920, "height": 1080, "contentAspect": "native"},
+        )
 
     def test_stream_letterboxes_without_cropping_or_stretching(self):
         source = Image.new("RGB", (160, 90), "#ff0000")
@@ -138,6 +163,20 @@ locked\tunauthorized usb:1-4
         self.assertEqual(frame.getpixel((50, 0)), (0, 0, 0))
         self.assertEqual(frame.getpixel((50, 22)), (255, 0, 0))
         self.assertEqual(frame.getpixel((50, 78)), (0, 0, 0))
+
+    def test_content_aspect_crop_keeps_the_center_game_area(self):
+        source = Image.new("RGB", (1920, 1080), "#ff0000")
+        cropped, crop = crop_image_to_content_aspect(source, "4:3")
+        self.assertEqual(crop, (240, 0, 1440, 1080))
+        self.assertEqual(cropped.size, (1440, 1080))
+
+        raw_source = np.zeros((1080, 1920, 3), dtype=np.uint8)
+        raw_cropped, raw_crop = crop_image_to_content_aspect(raw_source, "5:4")
+        self.assertEqual(raw_crop, (285, 0, 1350, 1080))
+        self.assertEqual(raw_cropped.shape, (1080, 1350, 3))
+        unchanged, native_crop = crop_image_to_content_aspect(source, "native")
+        self.assertIs(unchanged, source)
+        self.assertEqual(native_crop, (0, 0, 1920, 1080))
 
     def test_stream_uses_exact_integer_downscale_dimensions(self):
         source = Image.new("RGB", (1920, 1080), "#446688")
@@ -156,6 +195,14 @@ locked\tunauthorized usb:1-4
         source[:, :64] = (255, 0, 0)
         source[:, 64:] = (0, 0, 255)
         decoded = Image.open(io.BytesIO(encode_stream_frame(source, 95))).convert("RGB")
+        self.assertGreater(decoded.getpixel((20, 32))[0], 200)
+        self.assertGreater(decoded.getpixel((100, 32))[2], 200)
+
+    def test_raw_dxgi_jpeg_encoder_supports_sharp_444_chroma(self):
+        source = np.zeros((64, 128, 3), dtype=np.uint8)
+        source[:, :64] = (255, 0, 0)
+        source[:, 64:] = (0, 0, 255)
+        decoded = Image.open(io.BytesIO(encode_stream_frame(source, 90, "444"))).convert("RGB")
         self.assertGreater(decoded.getpixel((20, 32))[0], 200)
         self.assertGreater(decoded.getpixel((100, 32))[2], 200)
 
@@ -184,6 +231,28 @@ locked\tunauthorized usb:1-4
         )
         self.assertIsNone(
             project_cursor_to_stream((-101, 50), display, (200, 100), (100, 100))
+        )
+
+    def test_cursor_projects_inside_a_centered_content_crop(self):
+        display = {"x": 0, "y": 0, "width": 1920, "height": 1080}
+        self.assertEqual(
+            project_cursor_to_stream(
+                (960, 540),
+                display,
+                (1920, 1080),
+                (1280, 960),
+                (240, 0, 1440, 1080),
+            ),
+            (640, 480),
+        )
+        self.assertIsNone(
+            project_cursor_to_stream(
+                (120, 540),
+                display,
+                (1920, 1080),
+                (1280, 960),
+                (240, 0, 1440, 1080),
+            )
         )
 
     def test_cursor_overlay_marks_pillow_and_dxgi_frames(self):

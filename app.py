@@ -58,6 +58,13 @@ LATEST_FRAME_VIEWER_TTL_SECONDS = 4.0
 DISPLAY_ID_PATTERN = re.compile(r"^\\\\\.\\DISPLAY\d+$", re.IGNORECASE)
 CAPTURE_BACKENDS = {"auto", "dxgi", "pillow"}
 SOURCE_FIT_MODES = {"contain", "cover", "stretch"}
+JPEG_CHROMA_MODES = {"420", "444"}
+STREAM_CONTENT_ASPECTS: dict[str, float | None] = {
+    "native": None,
+    "4:3": 4 / 3,
+    "5:4": 5 / 4,
+    "7:5": 7 / 5
+}
 MAX_LENS_PROFILES = 12
 MAX_LENS_PROFILE_NAME_LENGTH = 32
 HAS_OPENCV = cv2 is not None and np is not None
@@ -72,6 +79,7 @@ DEFAULT_SETTINGS: dict[str, dict[str, Any]] = {
         "backend": "auto",
         "fps": 50,
         "quality": 58,
+        "chroma": "420",
         "scale": 0.5,  # Legacy setting retained for existing settings files.
         "cursor": True,
         "paused": False,
@@ -79,6 +87,7 @@ DEFAULT_SETTINGS: dict[str, dict[str, Any]] = {
     "stream": {
         "width": 960,
         "height": 540,
+        "contentAspect": "native",
     },
     "source": {
         "cropX": 0,
@@ -147,6 +156,14 @@ def sanitize_settings(candidate: Any) -> dict[str, dict[str, Any]]:
                 continue
             if (group, key) == ("capture", "backend"):
                 if isinstance(raw_value, str) and raw_value in CAPTURE_BACKENDS:
+                    result[group][key] = raw_value
+                continue
+            if (group, key) == ("capture", "chroma"):
+                if isinstance(raw_value, str) and raw_value in JPEG_CHROMA_MODES:
+                    result[group][key] = raw_value
+                continue
+            if (group, key) == ("stream", "contentAspect"):
+                if isinstance(raw_value, str) and raw_value in STREAM_CONTENT_ASPECTS:
                     result[group][key] = raw_value
                 continue
             if (group, key) == ("source", "fit"):
@@ -375,6 +392,44 @@ def image_dimensions(image: Image.Image | Any) -> tuple[int, int]:
     return image.size
 
 
+def crop_image_to_content_aspect(
+    image: Image.Image | Any,
+    aspect_mode: str,
+) -> tuple[Image.Image | Any, tuple[int, int, int, int]]:
+    """Center-crop only the requested game area before resize/JPEG encoding."""
+    width, height = image_dimensions(image)
+    if width < 1 or height < 1:
+        raise RuntimeError("Capture returned an empty image.")
+
+    target_aspect = STREAM_CONTENT_ASPECTS.get(aspect_mode)
+    if target_aspect is None:
+        return image, (0, 0, width, height)
+
+    current_aspect = width / height
+    if abs(current_aspect - target_aspect) < 0.0001:
+        return image, (0, 0, width, height)
+
+    if current_aspect > target_aspect:
+        crop_width = max(1, min(width, round(height * target_aspect)))
+        crop_height = height
+        left = (width - crop_width) // 2
+        top = 0
+    else:
+        crop_width = width
+        crop_height = max(1, min(height, round(width / target_aspect)))
+        left = 0
+        top = (height - crop_height) // 2
+    right = left + crop_width
+    bottom = top + crop_height
+
+    if is_raw_dxgi_frame(image):
+        # A contiguous crop keeps OpenCV resize/JPEG on its fastest path.
+        cropped = np.ascontiguousarray(image[top:bottom, left:right])
+    else:
+        cropped = image.crop((left, top, right, bottom))
+    return cropped, (left, top, crop_width, crop_height)
+
+
 def fit_image_to_stream(
     image: Image.Image | Any,
     width: int,
@@ -455,8 +510,9 @@ def project_cursor_to_stream(
     selected_display: dict[str, Any],
     source_size: tuple[int, int],
     stream_size: tuple[int, int],
+    content_crop: tuple[int, int, int, int] | None = None,
 ) -> tuple[int, int] | None:
-    """Map a Windows cursor point into the letterboxed encoded stream frame."""
+    """Map a Windows cursor point into the cropped, letterboxed stream frame."""
     if cursor_position is None:
         return None
     try:
@@ -478,9 +534,32 @@ def project_cursor_to_stream(
 
     source_x = relative_x * source_width / display_width
     source_y = relative_y * source_height / display_height
-    scale = min(stream_width / source_width, stream_height / source_height)
-    rendered_width = max(1, round(source_width * scale))
-    rendered_height = max(1, round(source_height * scale))
+    crop_left, crop_top, crop_width, crop_height = (0, 0, source_width, source_height)
+    if content_crop is not None:
+        try:
+            crop_left, crop_top, crop_width, crop_height = (int(value) for value in content_crop)
+        except (TypeError, ValueError):
+            return None
+        if (
+            crop_width < 1
+            or crop_height < 1
+            or crop_left < 0
+            or crop_top < 0
+            or crop_left + crop_width > source_width
+            or crop_top + crop_height > source_height
+        ):
+            return None
+    if not (
+        crop_left <= source_x < crop_left + crop_width
+        and crop_top <= source_y < crop_top + crop_height
+    ):
+        return None
+
+    source_x -= crop_left
+    source_y -= crop_top
+    scale = min(stream_width / crop_width, stream_height / crop_height)
+    rendered_width = max(1, round(crop_width * scale))
+    rendered_height = max(1, round(crop_height * scale))
     left = (stream_width - rendered_width) // 2
     top = (stream_height - rendered_height) // 2
     return (
@@ -526,15 +605,21 @@ def overlay_cursor_marker(
     return image
 
 
-def encode_stream_frame(image: Image.Image | Any, quality: int) -> bytes:
+def encode_stream_frame(image: Image.Image | Any, quality: int, chroma: str = "420") -> bytes:
     """Encode raw DXGI RGB with OpenCV, retaining Pillow for every fallback path."""
     if is_raw_dxgi_frame(image):
         if image.ndim == 3 and image.shape[2] == 3:
             bgr_image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
+            parameters = [cv2.IMWRITE_JPEG_QUALITY, quality]
+            sampling_key = getattr(cv2, "IMWRITE_JPEG_SAMPLING_FACTOR", None)
+            sampling_name = "IMWRITE_JPEG_SAMPLING_FACTOR_444" if chroma == "444" else "IMWRITE_JPEG_SAMPLING_FACTOR_420"
+            sampling_value = getattr(cv2, sampling_name, None)
+            if sampling_key is not None and sampling_value is not None:
+                parameters.extend((sampling_key, sampling_value))
             success, encoded = cv2.imencode(
                 ".jpg",
                 bgr_image,
-                [cv2.IMWRITE_JPEG_QUALITY, quality],
+                parameters,
             )
             if success:
                 return encoded.tobytes()
@@ -546,7 +631,7 @@ def encode_stream_frame(image: Image.Image | Any, quality: int) -> bytes:
         format="JPEG",
         quality=quality,
         optimize=False,
-        subsampling=2,
+        subsampling=0 if chroma == "444" else 2,
     )
     return buffer.getvalue()
 
@@ -776,6 +861,7 @@ class DxgiDesktopCapture:
                     device_idx=camera_key[0],
                     output_idx=camera_key[1],
                     output_color="RGB",
+                    max_buffer_len=1,
                     processor_backend="numpy",
                 )
                 self._camera_key = camera_key
@@ -973,6 +1059,9 @@ class DesktopCapture:
         self._requested_backend = "auto"
         self._active_backend = "starting"
         self._backend_detail = "Memilih backend capture."
+        self._content_width = width
+        self._content_height = height
+        self._content_aspect = DEFAULT_SETTINGS["stream"]["contentAspect"]
         self._dxgi_retry_at = 0.0
         self._thread = threading.Thread(target=self._capture_loop, name="desktop-capture", daemon=True)
 
@@ -1017,6 +1106,11 @@ class DesktopCapture:
                     "requested": self._requested_backend,
                     "active": self._active_backend,
                     "detail": self._backend_detail,
+                },
+                "content": {
+                    "width": self._content_width,
+                    "height": self._content_height,
+                    "aspect": self._content_aspect,
                 },
                 "error": self._error,
             }
@@ -1088,6 +1182,11 @@ class DesktopCapture:
                 capture_finished_at = time.perf_counter()
                 raw_dxgi_frame = is_raw_dxgi_frame(image)
                 source_size = image_dimensions(image)
+                image, content_crop = crop_image_to_content_aspect(
+                    image,
+                    stream_settings["contentAspect"],
+                )
+                content_size = image_dimensions(image)
                 cursor_position = (
                     windows_cursor_position() if capture_settings["cursor"] else None
                 )
@@ -1104,14 +1203,27 @@ class DesktopCapture:
                         selected_display,
                         source_size,
                         (stream_settings["width"], stream_settings["height"]),
+                        content_crop,
                     ),
                 )
                 resize_finished_at = time.perf_counter()
+                if content_crop[2:] != source_size:
+                    backend_detail += (
+                        " Area "
+                        + stream_settings["contentAspect"]
+                        + " tengah diambil sebelum resize."
+                    )
                 if is_raw_dxgi_frame(image):
                     backend_detail += " OpenCV SIMD resize dan JPEG aktif."
                 elif raw_dxgi_frame:
                     backend_detail += " OpenCV SIMD resize aktif; Pillow JPEG dipakai untuk letterbox."
-                encoded_frame = encode_stream_frame(image, capture_settings["quality"])
+                if capture_settings["chroma"] == "444":
+                    backend_detail += " JPEG 4:4:4 untuk teks/UI tajam."
+                encoded_frame = encode_stream_frame(
+                    image,
+                    capture_settings["quality"],
+                    capture_settings["chroma"],
+                )
                 encode_finished_at = time.perf_counter()
                 now = time.monotonic()
                 capture_ms = (capture_finished_at - frame_started_at) * 1000
@@ -1137,6 +1249,8 @@ class DesktopCapture:
                     self._requested_backend = capture_settings["backend"]
                     self._active_backend = active_backend
                     self._backend_detail = backend_detail
+                    self._content_width, self._content_height = content_size
+                    self._content_aspect = stream_settings["contentAspect"]
                     self._captured_frames += 1
                     self._encoded_bytes += len(encoded_frame)
                     self._target_fps = capture_settings["fps"]

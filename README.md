@@ -22,6 +22,11 @@ interface is a web app at /phone delivered through the USB ADB tunnel.
 - One-click quality profiles plus live bitrate, frame age, monitor, and headset status.
 - Fixed stream-frame presets (`960x540`, `1280x720`, `1600x900`, and `1920x1080`) with
   automatic black letterboxing instead of stretched output.
+- Game-aspect stream presets for `4:3` (`1280x960` and `1440x1080`) and `5:4`
+  (`1350x1080`), including a center-content crop that removes matching game pillarbox
+  before resize and JPEG encoding.
+- Selectable JPEG chroma: efficient 4:2:0 for low latency or sharp 4:4:4 for
+  colored text and UI detail when the USB bandwidth has headroom.
 - One shared settings model: changing a Studio slider updates the HP renderer.
 - Independent control for source crop, eye width/height, eye gap, offsets, zoom,
   barrel distortion, curvature, brightness, and fit mode.
@@ -130,10 +135,11 @@ the saved PC endpoint when needed.
 ## Practical setup for games
 
 1. Start LensCast before starting the game.
-2. For Persona 3 Reload, keep Mesin capture on Otomatis and use Game 30+
-   first: DXGI, 36 fps target, `960x540` stream frame, and JPEG quality 58. The
-   extra target headroom keeps measured FPS above 30 during Windows timing jitter.
-   The capture note should say `DXGI Desktop Duplication aktif` and `OpenCV SIMD`.
+2. For Persona 3 Reload, keep Mesin capture on Otomatis and start with
+   **Responsif**: DXGI, 60 fps target, JPEG quality 52, and 4:2:0 chroma. If the
+   capture readout cannot hold near its target, use **Seimbang** before raising
+   resolution. The capture note should say `DXGI Desktop Duplication aktif` and
+   `OpenCV SIMD`.
    If it says Pillow instead, start LensCast through `Start LensCast.bat` so the
    Python 3.12 environment with the optimized dependencies is used.
 3. Choose the monitor containing the game from Monitor sumber when using more
@@ -144,10 +150,17 @@ the saved PC endpoint when needed.
 6. Use keyboard/mouse or a controller connected to the PC as usual.
 
 The stream frame only affects the image sent to the phone. To reduce the game's
-own GPU workload, set the game's own resolution to `1280x720` or `1600x900` in
-its graphics menu. Keep the game's aspect ratio at 16:9: LensCast duplicates that
-one image into both eyes and adds black bars automatically when the VR Box lens
-area is closer to a square.
+own GPU workload, set the game's own resolution to `1280x720` or `1600x900` in its graphics menu. LensCast cannot force a game to render at 4:3; it captures the
+pixels Windows receives. When a game offers 4:3, set it to `1280x960` or
+`1440x1080`, then select the matching **4:3** stream preset. LensCast takes the
+center 4:3 area before JPEG encoding, which removes only the side pillarbox and
+keeps a genuine 4:3 game's UI intact. For a squarer lens area, `1280x1024` or
+`1350x1080` plus the matching **5:4** preset works the same way.
+
+If the game remains 16:9, leave **Area game dari monitor** on **Asli** and use
+**Pas**. Selecting a 4:3/5:4 area while a 16:9 game is active intentionally crops
+the left and right edges, including possible UI; it cannot make the same 16:9
+picture larger without that tradeoff.
 
 For the lowest practical latency, prefer the direct ADB USB tunnel. The phone
 now requests only the newest completed frame, so it skips stale JPEGs rather
@@ -159,6 +172,9 @@ identically to both eyes; it does not add true 3D depth or headset tracking.
 Once the `CAPTURE` readout stays at its target, raise Frame rate toward 60 before
 raising stream resolution. Use `960x540` when Wi-Fi is the limit, then try
 `1280x720`; `1600x900` can require much more bandwidth in detailed game scenes.
+Keep 4:2:0 for latency first. Use 4:4:4 only when colored game text still looks
+soft after selecting a suitable frame size, because it can substantially increase
+the JPEG size and phone decode time.
 
 Use Borderless Windowed or Windowed mode for Persona 3 Reload. Exclusive
 fullscreen can prevent any desktop capture method from receiving the game frame
@@ -171,6 +187,8 @@ on some Windows/GPU combinations.
 | Potong desktop | Chooses which part of the PC screen is mirrored. |
 | Cara isi frame mata | `Pas` preserves the source with black bars; `Penuhi` crops; `Regang` changes aspect ratio. |
 | Ukuran frame | Sets the stable encoded stream frame without changing the game's render resolution. |
+| Area game dari monitor | Crops a centered 4:3 or 5:4 game area before resize/JPEG. Use only with a game already set to that same aspect ratio. |
+| Detail warna dan teks | `4:2:0` minimizes latency; `4:4:4` keeps colored UI/text sharper at a higher bandwidth cost. |
 | Tampilkan kursor PC | Draws a visible pointer into the captured frame when Windows/DXGI does not include it. |
 | Lebar/Tinggi layar | Shrinks the active rectangle inside each physical half-screen. |
 | Jarak antar mata | Moves the active rectangles apart to match the lens centers. |
