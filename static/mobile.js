@@ -53,6 +53,7 @@
     "uniform float uBarrel;",
     "uniform float uCurvature;",
     "uniform float uBrightness;",
+    "uniform float uFlipVertical;",
     "varying vec2 vUv;",
     "void main() {",
     "  float eyeIndex = floor(vUv.x * 2.0);",
@@ -92,6 +93,9 @@
     "  if (sourcePoint.x < 0.0 || sourcePoint.x > 1.0 || sourcePoint.y < 0.0 || sourcePoint.y > 1.0) {",
     "    gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0);",
     "    return;",
+    "  }",
+    "  if (uFlipVertical > 0.5) {",
+    "    sourcePoint.y = 1.0 - sourcePoint.y;",
     "  }",
     "  vec2 sourceUv = uCrop.xy + sourcePoint * uCrop.zw;",
     "  vec3 color = texture2D(uTexture, sourceUv).rgb * uBrightness;",
@@ -357,7 +361,8 @@
         zoom: gl.getUniformLocation(program, "uZoom"),
         barrel: gl.getUniformLocation(program, "uBarrel"),
         curvature: gl.getUniformLocation(program, "uCurvature"),
-        brightness: gl.getUniformLocation(program, "uBrightness")
+        brightness: gl.getUniformLocation(program, "uBrightness"),
+        flipVertical: gl.getUniformLocation(program, "uFlipVertical")
       };
       var uploadedFrameRevision = -1;
       var lastLegacyTextureUploadAt = 0;
@@ -399,7 +404,7 @@
         var source = settings ? settings.source : { cropX: 0, cropY: 0, cropWidth: 100, cropHeight: 100 };
         var headset = settings ? settings.headset : {
           eyeWidth: 92, eyeHeight: 90, eyeGap: 2, eyeOffsetX: 0, eyeOffsetY: 0,
-          zoom: 1, barrel: 0.12, curvature: 0.08, brightness: 1
+          zoom: 1, barrel: 0.12, curvature: 0.08, brightness: 1, flipVertical: true
         };
         var stream = settings && settings.stream ? settings.stream : { width: 16, height: 9 };
         var sourceWidth = frame ? frame.width : stream.width;
@@ -426,6 +431,7 @@
         gl.uniform1f(uniforms.barrel, headset.barrel);
         gl.uniform1f(uniforms.curvature, headset.curvature);
         gl.uniform1f(uniforms.brightness, headset.brightness);
+        gl.uniform1f(uniforms.flipVertical, headset.flipVertical ? 1 : 0);
         gl.drawArrays(gl.TRIANGLES, 0, 6);
         gl.flush();
       }
@@ -462,15 +468,21 @@
       }
       var offsetX = eyeSign * headset.eyeOffsetX / 100 * width;
       var offsetY = headset.eyeOffsetY / 100 * height;
+      var drawX = x + (width - imageWidth) / 2 + offsetX;
+      var drawY = y + (height - imageHeight) / 2 + offsetY;
       context.filter = "brightness(" + headset.brightness + ")";
+      if (headset.flipVertical) {
+        context.translate(0, drawY * 2 + imageHeight);
+        context.scale(1, -1);
+      }
       context.drawImage(
         image,
         cropX,
         cropY,
         cropWidth,
         cropHeight,
-        x + (width - imageWidth) / 2 + offsetX,
-        y + (height - imageHeight) / 2 + offsetY,
+        drawX,
+        drawY,
         imageWidth,
         imageHeight
       );
@@ -648,6 +660,7 @@
       if (!Number.isFinite(sequence)) {
         sequence = frameSequence + 1;
       }
+      var streamReset = response.headers.get("X-LensCast-Stream-Reset") === "1";
       var serverAgeMs = Number(response.headers.get("X-LensCast-Frame-Age-Ms"));
       if (!Number.isFinite(serverAgeMs)) {
         serverAgeMs = 0;
@@ -658,6 +671,7 @@
         return {
           source: source,
           sequence: sequence,
+          streamReset: streamReset,
           ageMs: serverAgeMs + Math.max(0, nowMilliseconds() - responseReceivedAt)
         };
       });
@@ -665,7 +679,7 @@
       frameRequestRunning = false;
       frameRequestController = null;
       if (frame) {
-        if (frame.sequence > frameSequence) {
+        if (frame.streamReset || frame.sequence > frameSequence) {
           if (setCurrentFrame(frame.source, frame.sequence, frame.ageMs)) {
             frameSequence = frame.sequence;
             window.clearTimeout(retryTimer);

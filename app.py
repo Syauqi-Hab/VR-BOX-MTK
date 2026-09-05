@@ -57,6 +57,7 @@ BOUNDARY = "lenscast-frame"
 LATEST_FRAME_VIEWER_TTL_SECONDS = 4.0
 DISPLAY_ID_PATTERN = re.compile(r"^\\\\\.\\DISPLAY\d+$", re.IGNORECASE)
 CAPTURE_BACKENDS = {"auto", "dxgi", "pillow"}
+CAPTURE_RESIZE_MODES = {"fast", "sharp"}
 SOURCE_FIT_MODES = {"contain", "cover", "stretch"}
 JPEG_CHROMA_MODES = {"420", "444"}
 STREAM_CONTENT_ASPECTS: dict[str, float | None] = {
@@ -80,6 +81,7 @@ DEFAULT_SETTINGS: dict[str, dict[str, Any]] = {
         "fps": 50,
         "quality": 58,
         "chroma": "420",
+        "resizeMode": "fast",
         "scale": 0.5,  # Legacy setting retained for existing settings files.
         "cursor": True,
         "paused": False,
@@ -106,6 +108,7 @@ DEFAULT_SETTINGS: dict[str, dict[str, Any]] = {
         "barrel": 0.12,
         "curvature": 0.08,
         "brightness": 1.0,
+        "flipVertical": True,
         "nativeResolution": False,
     },
 }
@@ -146,6 +149,11 @@ def sanitize_settings(candidate: Any) -> dict[str, dict[str, Any]]:
             continue
         for key, default_value in defaults.items():
             raw_value = values.get(key, default_value)
+            if (group, key) == ("headset", "flipVertical") and key not in values:
+                # Preserve calibration saved by the short-lived 180-degree toggle.
+                legacy_value = values.get("rotate180")
+                if isinstance(legacy_value, bool):
+                    raw_value = legacy_value
             if (group, key) == ("capture", "display"):
                 if isinstance(raw_value, str):
                     display_id = raw_value.strip()
@@ -156,6 +164,10 @@ def sanitize_settings(candidate: Any) -> dict[str, dict[str, Any]]:
                 continue
             if (group, key) == ("capture", "backend"):
                 if isinstance(raw_value, str) and raw_value in CAPTURE_BACKENDS:
+                    result[group][key] = raw_value
+                continue
+            if (group, key) == ("capture", "resizeMode"):
+                if isinstance(raw_value, str) and raw_value in CAPTURE_RESIZE_MODES:
                     result[group][key] = raw_value
                 continue
             if (group, key) == ("capture", "chroma"):
@@ -173,6 +185,7 @@ def sanitize_settings(candidate: Any) -> dict[str, dict[str, Any]]:
             if (group, key) in {
                 ("capture", "cursor"),
                 ("capture", "paused"),
+                ("headset", "flipVertical"),
                 ("headset", "nativeResolution"),
             }:
                 if isinstance(raw_value, bool):
@@ -435,6 +448,7 @@ def fit_image_to_stream(
     width: int,
     height: int,
     preserve_raw: bool = False,
+    resize_mode: str = "fast",
 ) -> Image.Image | Any:
     """Resize to a stable stream frame without cropping or stretching the source."""
     raw_dxgi_frame = is_raw_dxgi_frame(image)
@@ -452,7 +466,9 @@ def fit_image_to_stream(
     )
     if raw_dxgi_frame:
         downscaling = resized_size[0] <= source_width and resized_size[1] <= source_height
-        interpolation = cv2.INTER_AREA if downscaling else cv2.INTER_LINEAR
+        interpolation = cv2.INTER_LINEAR
+        if downscaling and resize_mode == "sharp":
+            interpolation = cv2.INTER_AREA
         if (source_width, source_height) != resized_size:
             image = cv2.resize(image, resized_size, interpolation=interpolation)
         if preserve_raw and resized_size == (width, height) and image.ndim == 3 and image.shape[2] == 3:
@@ -471,7 +487,9 @@ def fit_image_to_stream(
             image = image.reduce(horizontal_factor)
         else:
             downscaling = resized_size[0] <= image.width and resized_size[1] <= image.height
-            resample = Image.Resampling.BOX if downscaling else Image.Resampling.BILINEAR
+            resample = Image.Resampling.BILINEAR
+            if downscaling and resize_mode == "sharp":
+                resample = Image.Resampling.BOX
             image = image.resize(resized_size, resample)
     if image.mode != "RGB":
         image = image.convert("RGB")
@@ -1195,6 +1213,7 @@ class DesktopCapture:
                     stream_settings["width"],
                     stream_settings["height"],
                     preserve_raw=raw_dxgi_frame,
+                    resize_mode=capture_settings["resizeMode"],
                 )
                 image = overlay_cursor_marker(
                     image,
@@ -1219,6 +1238,8 @@ class DesktopCapture:
                     backend_detail += " OpenCV SIMD resize aktif; Pillow JPEG dipakai untuk letterbox."
                 if capture_settings["chroma"] == "444":
                     backend_detail += " JPEG 4:4:4 untuk teks/UI tajam."
+                if capture_settings["resizeMode"] == "fast":
+                    backend_detail += " Resize linear cepat untuk latency rendah."
                 encoded_frame = encode_stream_frame(
                     image,
                     capture_settings["quality"],
@@ -1660,7 +1681,8 @@ class LensCastRequestHandler(BaseHTTPRequestHandler):
         after_sequence = self._after_sequence(query)
         frame = self.server.capture.get_after(after_sequence, timeout=1.2)
         self.server.viewers.heartbeat(requested_role)
-        if frame.sequence <= after_sequence:
+        stream_reset = after_sequence > frame.sequence
+        if frame.sequence <= after_sequence and not stream_reset:
             self.send_response(HTTPStatus.NO_CONTENT)
             self.send_header("Cache-Control", "no-store, no-cache, must-revalidate")
             self.send_header("Content-Length", "0")
@@ -1675,6 +1697,8 @@ class LensCastRequestHandler(BaseHTTPRequestHandler):
         self.send_header("Pragma", "no-cache")
         self.send_header("X-LensCast-Sequence", str(frame.sequence))
         self.send_header("X-LensCast-Frame-Age-Ms", str(frame_age_ms))
+        if stream_reset:
+            self.send_header("X-LensCast-Stream-Reset", "1")
         self.end_headers()
         try:
             self.wfile.write(frame.jpeg)

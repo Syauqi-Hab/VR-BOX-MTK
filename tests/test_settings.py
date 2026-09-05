@@ -80,6 +80,14 @@ locked\tunauthorized usb:1-4
         self.assertFalse(sanitize_settings({"headset": {"nativeResolution": 1}})["headset"]["nativeResolution"])
         self.assertTrue(sanitize_settings({"headset": {"nativeResolution": True}})["headset"]["nativeResolution"])
 
+    def test_vertical_frame_flip_requires_a_boolean(self):
+        self.assertTrue(sanitize_settings({"headset": {"flipVertical": 0}})["headset"]["flipVertical"])
+        self.assertFalse(sanitize_settings({"headset": {"flipVertical": False}})["headset"]["flipVertical"])
+
+    def test_legacy_frame_rotation_migrates_to_vertical_flip(self):
+        settings = sanitize_settings({"headset": {"rotate180": True}})
+        self.assertTrue(settings["headset"]["flipVertical"])
+
     def test_lens_profiles_round_trip_and_replace_by_name(self):
         with tempfile.TemporaryDirectory() as temporary_directory:
             path = Path(temporary_directory) / "lens-profiles.json"
@@ -111,11 +119,14 @@ locked\tunauthorized usb:1-4
         invalid = sanitize_settings({"capture": {"display": "not-a-monitor"}})
         self.assertEqual(invalid["capture"]["display"], "all")
 
-    def test_capture_backend_accepts_known_values_only(self):
-        settings = sanitize_settings({"capture": {"backend": "dxgi"}})
+    def test_capture_backend_and_resize_mode_accept_known_values_only(self):
+        settings = sanitize_settings({"capture": {"backend": "dxgi", "resizeMode": "sharp"}})
         self.assertEqual(settings["capture"]["backend"], "dxgi")
+        self.assertEqual(settings["capture"]["resizeMode"], "sharp")
         invalid = sanitize_settings({"capture": {"backend": "unknown"}})
         self.assertEqual(invalid["capture"]["backend"], "auto")
+        invalid = sanitize_settings({"capture": {"resizeMode": "bicubic"}})
+        self.assertEqual(invalid["capture"]["resizeMode"], "fast")
 
     def test_chroma_and_content_aspect_accept_known_values_only(self):
         settings = sanitize_settings(
@@ -308,6 +319,12 @@ locked\tunauthorized usb:1-4
             second = connection.getresponse()
             self.assertEqual(second.status, 204)
             self.assertEqual(second.read(), b"")
+
+            connection.request("GET", "/frame.jpg?role=phone&after=99")
+            reset = connection.getresponse()
+            self.assertEqual(reset.status, 200)
+            self.assertEqual(reset.read(), b"test-jpeg")
+            self.assertEqual(reset.getheader("X-LensCast-Stream-Reset"), "1")
         finally:
             connection.close()
             server.shutdown()
@@ -321,6 +338,7 @@ locked\tunauthorized usb:1-4
         self.assertIsNone(dxgi_output_index(displays[0], displays))
         self.assertEqual(dxgi_output_index(display_one, displays), 0)
         self.assertEqual(dxgi_output_index(display_two, displays), 1)
+
 
 
 if __name__ == "__main__":

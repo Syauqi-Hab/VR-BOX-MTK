@@ -101,6 +101,13 @@
           <input data-path="capture.quality" data-unit="%" type="range" min="30" max="95" step="1">
         </label>
         <label class="select-control">
+          <span>Filter resize</span>
+          <select id="resizeModeSelect" data-path="capture.resizeMode" aria-label="Pilih filter resize stream">
+            <option value="fast">Linear cepat - latency minimal</option>
+            <option value="sharp">Area tajam - lebih berat</option>
+          </select>
+        </label>
+        <label class="select-control">
           <span>Detail warna dan teks</span>
           <select id="chromaSelect" data-path="capture.chroma" aria-label="Pilih detail warna JPEG">
             <option value="420">4:2:0 cepat - latency minimal</option>
@@ -329,6 +336,14 @@
         <label class="range-control">
           <span>Kecerahan <output data-output="headset.brightness"></output></span>
           <input data-path="headset.brightness" data-unit="x" data-decimals="2" type="range" min="0.5" max="1.5" step="0.01">
+        </label>
+        <label class="switch-control">
+          <span>
+            <b>Balik gambar atas-bawah</b>
+            <small>Kompensasi WebGL Android bila stream terbalik secara vertikal. UI LensCast tidak ikut diputar.</small>
+          </span>
+          <input data-path="headset.flipVertical" type="checkbox">
+          <i aria-hidden="true"></i>
         </label>
       </section>
 
