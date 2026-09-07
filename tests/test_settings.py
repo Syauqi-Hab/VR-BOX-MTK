@@ -14,6 +14,7 @@ from PIL import Image
 
 from app import (
     DEFAULT_SETTINGS,
+    DesktopCapture,
     Frame,
     LensCastHTTPServer,
     LensProfileStore,
@@ -287,20 +288,56 @@ locked\tunauthorized usb:1-4
         viewers = ViewerRegistry()
         viewers.heartbeat("phone")
         self.assertEqual(viewers.snapshot()["phone"], 1)
+        self.assertTrue(viewers.has_viewers())
+
+    def test_auto_capture_uses_gdi_while_dxgi_recovers(self):
+        display = {
+            "id": "all",
+            "label": "Desktop virtual",
+            "x": 0,
+            "y": 0,
+            "width": 320,
+            "height": 180,
+        }
+
+        class StaticDisplays:
+            def resolve(self, _display_id):
+                return display, True
+
+            def get(self):
+                return [display]
+
+        capture = DesktopCapture(object(), StaticDisplays())
+        fallback = Image.new("RGB", (320, 180), "black")
+        capture_settings = {"display": "all", "backend": "auto"}
+        with (
+            patch.object(capture._dxgi, "grab", side_effect=RuntimeError("temporary failure")),
+            patch("app.grab_desktop_with_gdi", return_value=fallback) as gdi_grab,
+            patch("app.grab_desktop", side_effect=AssertionError("Pillow should not run")),
+        ):
+            image, _, _, backend, detail = capture._capture_image(capture_settings)
+
+        self.assertIs(image, fallback)
+        self.assertEqual(backend, "gdi")
+        self.assertIn("DXGI akan dicoba kembali", detail)
+        gdi_grab.assert_called_once_with()
 
     def test_latest_frame_route_returns_only_new_frames_on_one_connection(self):
+        viewers = ViewerRegistry()
+
         class StaticCapture:
             frame = Frame(5, b"test-jpeg", 320, 180, time.monotonic())
 
             def get_after(self, _sequence, timeout=4.0):
+                self.viewer_was_awake = viewers.has_viewers()
                 return self.frame
 
-        viewers = ViewerRegistry()
+        capture = StaticCapture()
         server = LensCastHTTPServer(
             ("127.0.0.1", 0),
             object(),
             object(),
-            StaticCapture(),
+            capture,
             object(),
             viewers,
         )
@@ -314,6 +351,7 @@ locked\tunauthorized usb:1-4
             self.assertEqual(first.read(), b"test-jpeg")
             self.assertEqual(first.getheader("X-LensCast-Sequence"), "5")
             self.assertEqual(viewers.snapshot()["phone"], 1)
+            self.assertTrue(capture.viewer_was_awake)
 
             connection.request("GET", "/frame.jpg?role=phone&after=5")
             second = connection.getresponse()

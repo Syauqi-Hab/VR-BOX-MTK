@@ -19,9 +19,13 @@
   var wakeLock = null;
   var renderDirty = true;
   var nextKeepAliveAt = 0;
+  var deliveredFrameTimes = [];
+  var lastDeliveredFrameAt = 0;
+  var lastFpsCounterUpdateAt = 0;
 
   var canvas = document.getElementById("vrCanvas");
   var streamImage = document.getElementById("phoneStream");
+  var fpsCounter = document.getElementById("vrFpsCounter");
   var onboarding = document.getElementById("onboarding");
   var chrome = document.getElementById("phoneChrome");
   var tuneSheet = document.getElementById("tuneSheet");
@@ -144,6 +148,43 @@
     }
   }
 
+  function updateFpsCounter(now, forceOffline) {
+    if (!fpsCounter) {
+      return;
+    }
+    if (forceOffline || !lastDeliveredFrameAt || now - lastDeliveredFrameAt > 1500) {
+      fpsCounter.textContent = "HP -- FPS";
+      fpsCounter.classList.remove("live");
+      return;
+    }
+    while (deliveredFrameTimes.length > 1 && deliveredFrameTimes[0] < now - 1000) {
+      deliveredFrameTimes.shift();
+    }
+    if (deliveredFrameTimes.length < 2) {
+      return;
+    }
+    var elapsed = deliveredFrameTimes[deliveredFrameTimes.length - 1] - deliveredFrameTimes[0];
+    if (elapsed <= 0) {
+      return;
+    }
+    var measuredFps = (deliveredFrameTimes.length - 1) * 1000 / elapsed;
+    fpsCounter.textContent = "HP " + Math.round(measuredFps) + " FPS";
+    fpsCounter.classList.add("live");
+  }
+
+  function recordDeliveredFrame() {
+    var now = nowMilliseconds();
+    lastDeliveredFrameAt = now;
+    deliveredFrameTimes.push(now);
+    while (deliveredFrameTimes.length > 1 && deliveredFrameTimes[0] < now - 1000) {
+      deliveredFrameTimes.shift();
+    }
+    if (now - lastFpsCounterUpdateAt >= 250) {
+      lastFpsCounterUpdateAt = now;
+      updateFpsCounter(now, false);
+    }
+  }
+
   function setCurrentFrame(source, sequence, ageMs) {
     var width = frameSourceWidth(source);
     var height = frameSourceHeight(source);
@@ -164,6 +205,7 @@
     };
     latestFrameAgeMs = Number.isFinite(ageMs) ? Math.max(0, Math.round(ageMs)) : null;
     renderDirty = true;
+    recordDeliveredFrame();
     return true;
   }
 
@@ -596,6 +638,7 @@
 
   function updateMobileStatus() {
     requestJson("/api/status").then(function (status) {
+      updateFpsCounter(nowMilliseconds(), false);
       if (status.capture.error) {
         stateLabel.textContent = "Capture PC error: " + status.capture.error;
       } else if (status.capture.sequence > 0) {
@@ -605,6 +648,7 @@
         stateLabel.textContent = "Menunggu capture desktop...";
       }
     })["catch"](function () {
+      updateFpsCounter(nowMilliseconds(), true);
       stateLabel.textContent = "Tidak dapat menjangkau PC. Cek USB atau Wi-Fi.";
     });
   }

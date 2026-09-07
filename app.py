@@ -55,6 +55,8 @@ LENS_PROFILES_PATH = Path(
 )
 BOUNDARY = "lenscast-frame"
 LATEST_FRAME_VIEWER_TTL_SECONDS = 4.0
+DXGI_RETRY_SECONDS = 0.75
+IDLE_CAPTURE_POLL_SECONDS = 0.1
 DISPLAY_ID_PATTERN = re.compile(r"^\\\\\.\\DISPLAY\d+$", re.IGNORECASE)
 CAPTURE_BACKENDS = {"auto", "dxgi", "pillow"}
 CAPTURE_RESIZE_MODES = {"fast", "sharp"}
@@ -1046,10 +1048,16 @@ def grab_desktop() -> Image.Image:
 
 
 class DesktopCapture:
-    def __init__(self, settings: SettingsStore, displays: DisplayCatalog) -> None:
+    def __init__(
+        self,
+        settings: SettingsStore,
+        displays: DisplayCatalog,
+        viewers: ViewerRegistry | None = None,
+    ) -> None:
         jpeg, width, height = placeholder_frame()
         self._settings = settings
         self._displays = displays
+        self._viewers = viewers
         self._dxgi = DxgiDesktopCapture()
         self._condition = threading.Condition()
         self._frame = Frame(0, jpeg, width, height, time.monotonic())
@@ -1081,6 +1089,7 @@ class DesktopCapture:
         self._content_height = height
         self._content_aspect = DEFAULT_SETTINGS["stream"]["contentAspect"]
         self._dxgi_retry_at = 0.0
+        self._idle = False
         self._thread = threading.Thread(target=self._capture_loop, name="desktop-capture", daemon=True)
 
     def start(self) -> None:
@@ -1153,12 +1162,24 @@ class DesktopCapture:
                     "DXGI Desktop Duplication aktif.",
                 )
             except Exception as error:
-                self._dxgi_retry_at = time.monotonic() + 3
+                self._dxgi_retry_at = time.monotonic() + DXGI_RETRY_SECONDS
                 dxgi_error = str(error)
         elif requested_backend == "pillow":
             self._dxgi.close()
 
-        image = grab_desktop()
+        if requested_backend == "pillow":
+            image = grab_desktop()
+            active_backend = "pillow"
+            detail = "Pillow ImageGrab aktif."
+        else:
+            try:
+                image = grab_desktop_with_gdi()
+                active_backend = "gdi"
+                detail = "GDI fallback sementara; DXGI akan dicoba kembali."
+            except Exception as gdi_error:
+                image = grab_desktop()
+                active_backend = "pillow"
+                detail = f"GDI gagal ({gdi_error}); Pillow fallback aktif."
         virtual_display = displays[0]
         if virtual_display["width"] < 1 or virtual_display["height"] < 1:
             virtual_display = {
@@ -1169,16 +1190,43 @@ class DesktopCapture:
                 "height": image.height,
             }
         image = crop_image_to_display(image, virtual_display, selected_display)
-        detail = "Pillow ImageGrab aktif."
         if dxgi_error:
-            detail = "DXGI fallback ke Pillow: " + dxgi_error
-        elif requested_backend == "dxgi":
-            detail = "DXGI sedang cooldown; Pillow dipakai sementara."
-        return image, selected_display, target_available, "pillow", detail
+            detail += " Penyebab DXGI: " + dxgi_error
+        return image, selected_display, target_available, active_backend, detail
+
+    def _reset_measurements(self, now: float) -> None:
+        self._captured_frames = 0
+        self._encoded_bytes = 0
+        self._timing_frames = 0
+        self._capture_ms_total = 0.0
+        self._resize_ms_total = 0.0
+        self._encode_ms_total = 0.0
+        self._pipeline_ms_total = 0.0
+        self._fps_window_started = now
 
     def _capture_loop(self) -> None:
         next_frame_at = time.monotonic()
         while self._running.is_set():
+            if self._viewers is not None and not self._viewers.has_viewers():
+                if not self._idle:
+                    self._idle = True
+                    self._dxgi.close()
+                    now = time.monotonic()
+                    with self._condition:
+                        self._measured_fps = 0.0
+                        self._bitrate_mbps = 0.0
+                        self._active_backend = "idle"
+                        self._backend_detail = "Capture tidur karena belum ada viewer aktif."
+                        self._reset_measurements(now)
+                time.sleep(IDLE_CAPTURE_POLL_SECONDS)
+                next_frame_at = time.monotonic()
+                continue
+            if self._idle:
+                self._idle = False
+                self._dxgi_retry_at = 0.0
+                self._reset_measurements(time.monotonic())
+                next_frame_at = time.monotonic()
+
             current_settings = self._settings.get()
             capture_settings = current_settings["capture"]
             stream_settings = current_settings["stream"]
@@ -1356,6 +1404,14 @@ class ViewerRegistry:
         with self._lock:
             self._last_seen[role] = time.monotonic()
         return role
+
+    def has_viewers(self) -> bool:
+        """Return quickly when capture has any connected or recently polling viewer."""
+        with self._lock:
+            if any(count > 0 for count in self._counts.values()):
+                return True
+            cutoff = time.monotonic() - LATEST_FRAME_VIEWER_TTL_SECONDS
+            return any(seen_at >= cutoff for seen_at in self._last_seen.values())
 
     def snapshot(self) -> dict[str, int]:
         with self._lock:
@@ -1678,9 +1734,9 @@ class LensCastRequestHandler(BaseHTTPRequestHandler):
         """Return one fresh JPEG, waiting briefly instead of letting the client queue MJPEG parts."""
         self._configure_stream_socket(256 * 1024)
         requested_role = parse_qs(query).get("role", ["other"])[0]
+        self.server.viewers.heartbeat(requested_role)
         after_sequence = self._after_sequence(query)
         frame = self.server.capture.get_after(after_sequence, timeout=1.2)
-        self.server.viewers.heartbeat(requested_role)
         stream_reset = after_sequence > frame.sequence
         if frame.sequence <= after_sequence and not stream_reset:
             self.send_response(HTTPStatus.NO_CONTENT)
@@ -1763,7 +1819,7 @@ def main() -> int:
     lens_profiles = LensProfileStore()
     displays = DisplayCatalog()
     viewers = ViewerRegistry()
-    capture = DesktopCapture(settings, displays)
+    capture = DesktopCapture(settings, displays, viewers)
     capture.start()
     try:
         server = LensCastHTTPServer(
