@@ -189,9 +189,9 @@ button {
 
 .studio-layout {
   display: grid;
-  grid-template-columns: minmax(238px, 280px) minmax(420px, 1fr) minmax(238px, 280px);
+  grid-template-columns: minmax(270px, 320px) minmax(440px, 1fr) minmax(270px, 320px);
   gap: 1px;
-  max-width: 1740px;
+  max-width: 1840px;
   margin: 0 auto;
   border-inline: 1px solid var(--line);
   background: var(--line);
@@ -794,7 +794,7 @@ input[type="range"]::-moz-range-thumb {
   grid-template-columns: minmax(210px, 1fr) minmax(250px, 1.35fr) minmax(180px, 0.8fr);
   align-items: center;
   gap: 28px;
-  max-width: 1740px;
+  max-width: 1840px;
   margin: 0 auto;
   padding: 22px 30px;
   border: 1px solid var(--line);
@@ -848,6 +848,129 @@ input[type="range"]::-moz-range-thumb {
   color: #a7b5a9;
   font-size: 9px;
   line-height: 1.35;
+}
+
+/* Keep the dense control studio readable at normal desktop viewing distance. */
+@media (min-width: 821px) {
+
+.studio-page .topbar-status,
+.studio-page .connection-note {
+  font-size: 11px;
+}
+
+.studio-page .quiet-button,
+.studio-page .phone-button {
+  font-size: 13px;
+}
+
+.studio-page .panel-heading h1,
+.studio-page .panel-heading h2,
+.studio-page .workspace-head h2 {
+  font-size: 22px;
+}
+
+.studio-page .panel-heading p:not(.eyebrow),
+.studio-page .connection-copy p:not(.eyebrow) {
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.studio-page .eyebrow {
+  font-size: 11px;
+}
+
+.studio-page .section-title {
+  font-size: 14px;
+}
+
+.studio-page .text-button {
+  font-size: 11px;
+}
+
+.studio-page .micro-pill {
+  padding: 4px 6px;
+  font-size: 9px;
+}
+
+.studio-page .range-control > span,
+.studio-page .select-control > span,
+.studio-page .lens-profile-name > span {
+  font-size: 13px;
+}
+
+.studio-page .range-control output {
+  font-size: 12px;
+}
+
+.studio-page .select-control select,
+.studio-page .lens-profile-name input {
+  min-height: 40px;
+  font-size: 13px;
+}
+
+.studio-page .lens-profile-button,
+.studio-page .lens-profile-save {
+  min-height: 39px;
+  font-size: 12px;
+}
+
+.studio-page .control-note {
+  min-height: 34px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.studio-page .switch-control,
+.studio-page .switch-control b {
+  font-size: 13px;
+}
+
+.studio-page .switch-control small {
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.studio-page .preset-button {
+  min-height: 62px;
+  padding: 9px 7px;
+}
+
+.studio-page .preset-button b {
+  font-size: 12px;
+  line-height: 1.15;
+}
+
+.studio-page .preset-button small {
+  font-size: 10px;
+  line-height: 1.25;
+}
+
+.studio-page .view-toggle button,
+.studio-page .preview-expand {
+  font-size: 11px;
+}
+
+.studio-page .preview-legend {
+  font-size: 10px;
+}
+
+.studio-page .readout span {
+  font-size: 10px;
+}
+
+.studio-page .readout b,
+.studio-page .preview-tip {
+  font-size: 12px;
+}
+
+.studio-page .connection-copy h2 {
+  font-size: 19px;
+}
+
+.studio-page .phone-url code,
+.studio-page .phone-url button {
+  font-size: 13px;
+}
 }
 
 #streamImage {
