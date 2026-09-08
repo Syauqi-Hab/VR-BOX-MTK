@@ -850,6 +850,341 @@ input[type="range"]::-moz-range-thumb {
   line-height: 1.35;
 }
 
+/* Studio refresh: quiet surfaces, clear hierarchy, and fewer controls at once. */
+.studio-page {
+  --panel: #111b19;
+  --panel-soft: #16211f;
+  --line: rgba(205, 224, 204, 0.12);
+  --line-bright: rgba(200, 255, 112, 0.42);
+  --muted: #a9b5ae;
+  color-scheme: dark;
+  background:
+    radial-gradient(circle at 52% -12%, rgba(136, 201, 103, 0.13), transparent 35rem),
+    radial-gradient(circle at 0 100%, rgba(54, 132, 126, 0.09), transparent 31rem),
+    #09100f;
+}
+
+.studio-page .grain {
+  opacity: 0.045;
+}
+
+.studio-page .topbar {
+  position: sticky;
+  z-index: 30;
+  top: 0;
+  min-height: 68px;
+  padding-inline: clamp(18px, 2.4vw, 42px);
+  border-bottom-color: rgba(210, 230, 210, 0.1);
+  background: rgba(8, 15, 14, 0.88);
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.18);
+  backdrop-filter: blur(20px) saturate(125%);
+}
+
+.studio-page .brand {
+  letter-spacing: 0.055em;
+}
+
+.studio-page .topbar-status {
+  min-height: 34px;
+  padding: 0 13px;
+  border: 1px solid rgba(199, 224, 198, 0.13);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.studio-page .quiet-button {
+  min-height: 38px;
+  padding-inline: 12px;
+  border-radius: 9px;
+}
+
+.studio-page .quiet-button:hover {
+  background: rgba(255, 255, 255, 0.045);
+}
+
+.studio-page .phone-button {
+  min-height: 42px;
+  padding-inline: 16px;
+  border: 0;
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(167, 228, 92, 0.1);
+}
+
+.studio-page .studio-layout {
+  align-items: start;
+  gap: 16px;
+  padding: 18px;
+  border: 0;
+  background: transparent;
+}
+
+.studio-page .inspector-panel,
+.studio-page .workspace-panel,
+.studio-page .calibration-panel {
+  overflow: hidden;
+  border: 1px solid rgba(205, 224, 204, 0.12);
+  border-radius: 16px;
+  background: linear-gradient(155deg, rgba(20, 31, 29, 0.98), rgba(13, 22, 21, 0.99));
+  box-shadow: 0 20px 48px rgba(0, 0, 0, 0.16);
+}
+
+.studio-page .inspector-panel,
+.studio-page .calibration-panel {
+  padding: 22px;
+}
+
+.studio-page .panel-heading {
+  padding-bottom: 18px;
+}
+
+.studio-page .panel-heading p:not(.eyebrow) {
+  max-width: 31ch;
+}
+
+.panel-tabs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid rgba(205, 224, 204, 0.12);
+  border-radius: 11px;
+  background: rgba(3, 10, 9, 0.45);
+}
+
+.panel-tabs button {
+  min-height: 38px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 8px;
+  color: var(--muted);
+  background: transparent;
+  font-family: var(--display);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.025em;
+  transition: color 150ms ease, background 150ms ease, box-shadow 150ms ease;
+}
+
+.panel-tabs button:hover {
+  color: var(--paper);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.panel-tabs button.active {
+  color: #172015;
+  background: var(--lime);
+  box-shadow: 0 5px 14px rgba(139, 185, 75, 0.14);
+}
+
+.panel-tabs button:focus-visible {
+  outline: 2px solid var(--cyan);
+  outline-offset: 2px;
+}
+
+.panel-view[hidden] {
+  display: none !important;
+}
+
+.studio-page .control-section {
+  padding: 20px 0 4px;
+  border-top: 0;
+}
+
+.studio-page .panel-view .control-section + .control-section {
+  margin-top: 18px;
+  padding-top: 22px;
+  border-top: 1px solid var(--line);
+}
+
+.studio-page .section-title {
+  margin-bottom: 16px;
+}
+
+.studio-page .range-control {
+  margin-bottom: 16px;
+}
+
+.studio-page .range-control > span,
+.studio-page .select-control > span,
+.studio-page .lens-profile-name > span {
+  color: #bec9c1;
+}
+
+.studio-page .select-control + .select-control {
+  margin-top: 16px;
+}
+
+.studio-page .select-control select,
+.studio-page .lens-profile-name input {
+  border-color: rgba(209, 238, 204, 0.16);
+  border-radius: 9px;
+  background-color: rgba(3, 10, 9, 0.52);
+}
+
+.studio-page .select-control select:hover,
+.studio-page .lens-profile-name input:hover {
+  border-color: rgba(209, 238, 204, 0.3);
+}
+
+.studio-page .control-note {
+  color: #91a097;
+}
+
+.studio-page input[type="range"] {
+  height: 20px;
+}
+
+.studio-page input[type="range"]::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 999px;
+}
+
+.studio-page input[type="range"]::-webkit-slider-thumb {
+  width: 16px;
+  height: 16px;
+  margin-top: -6px;
+}
+
+.studio-page input[type="range"]::-moz-range-track,
+.studio-page input[type="range"]::-moz-range-progress {
+  height: 4px;
+  border-radius: 999px;
+}
+
+.studio-page input[type="range"]::-moz-range-thumb {
+  width: 13px;
+  height: 13px;
+}
+
+.studio-page .preset-grid {
+  gap: 8px;
+}
+
+.studio-page .preset-button,
+.studio-page .lens-profile-button,
+.studio-page .lens-profile-save {
+  border-color: rgba(216, 237, 213, 0.13);
+  border-radius: 9px;
+  background: rgba(3, 10, 9, 0.38);
+}
+
+.studio-page .preset-button:hover,
+.studio-page .lens-profile-button:hover,
+.studio-page .lens-profile-save:hover {
+  background: rgba(200, 255, 112, 0.07);
+}
+
+.studio-page .preset-button.active {
+  box-shadow: inset 0 0 0 1px rgba(200, 255, 112, 0.12);
+}
+
+.studio-page .switch-control {
+  min-height: 42px;
+}
+
+.studio-page .switch-control i {
+  flex-basis: 40px;
+  width: 40px;
+  height: 22px;
+}
+
+.studio-page .switch-control i::after {
+  width: 14px;
+  height: 14px;
+}
+
+.studio-page .switch-control input:checked + i::after {
+  left: 20px;
+}
+
+.studio-page .workspace-panel {
+  padding: 22px;
+}
+
+.studio-page .workspace-head {
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.studio-page .view-toggle,
+.studio-page .preview-expand {
+  border-color: rgba(205, 224, 204, 0.13);
+  border-radius: 9px;
+  background: rgba(3, 10, 9, 0.42);
+}
+
+.studio-page .view-toggle {
+  border-radius: 10px;
+}
+
+.studio-page .view-toggle button {
+  min-height: 32px;
+  border-radius: 7px;
+}
+
+.studio-page .preview-expand {
+  min-height: 40px;
+  padding-inline: 13px;
+}
+
+.studio-page .preview-shell {
+  min-height: 400px;
+  border-color: rgba(213, 240, 208, 0.16);
+  border-radius: 13px;
+  background:
+    radial-gradient(circle at 50% 50%, rgba(66, 109, 91, 0.09), transparent 48%),
+    #070e0d;
+}
+
+.studio-page .workspace-foot {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  padding-top: 12px;
+}
+
+.studio-page .readout {
+  min-height: 57px;
+  align-content: center;
+  padding: 9px 11px;
+  border: 1px solid rgba(205, 224, 204, 0.08);
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.studio-page .preview-tip {
+  grid-column: 1 / -1;
+  margin: 2px 2px 0;
+  text-align: left;
+}
+
+.studio-page .connection-dock {
+  width: calc(100% - 36px);
+  margin: 0 auto 24px;
+  padding: 20px 24px;
+  border: 1px solid rgba(205, 224, 204, 0.12);
+  border-radius: 14px;
+  background: rgba(15, 25, 23, 0.9);
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.14);
+}
+
+.studio-page .phone-url {
+  overflow: hidden;
+  border-color: rgba(200, 255, 112, 0.3);
+  border-radius: 9px;
+}
+
+.studio-page .phone-url button {
+  min-width: 72px;
+}
+
+@media (min-width: 1251px) {
+  .studio-page .workspace-panel {
+    position: sticky;
+    top: 86px;
+  }
+}
+
 /* Keep the dense control studio readable at normal desktop viewing distance. */
 @media (min-width: 821px) {
 
@@ -1285,21 +1620,12 @@ input[type="range"]::-moz-range-thumb {
 
   .calibration-panel {
     grid-column: 1 / -1;
-    display: grid;
-    grid-template-columns: 0.9fr repeat(4, minmax(0, 1fr));
-    gap: 20px;
+    display: block;
     padding-block: 22px;
   }
 
-  .calibration-panel .panel-heading,
-  .calibration-panel .control-section {
-    min-width: 0;
-    padding: 0;
-    border-top: 0;
-  }
-
   .calibration-panel .panel-heading {
-    padding-right: 18px;
+    padding-right: 0;
   }
 }
 
@@ -1330,14 +1656,12 @@ input[type="range"]::-moz-range-thumb {
   }
 
   .inspector-panel {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 0 22px;
+    display: block;
     padding: 22px 19px;
   }
 
   .inspector-panel .panel-heading {
-    grid-column: 1 / -1;
+    width: 100%;
   }
 
   .workspace-panel {

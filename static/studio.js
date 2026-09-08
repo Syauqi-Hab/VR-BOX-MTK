@@ -88,6 +88,65 @@
     control.style.setProperty("--fill", String(fill) + "%");
   }
 
+  function setupPanelTabs() {
+    var tabLists = Array.prototype.slice.call(document.querySelectorAll("[data-tab-group]"));
+    tabLists.forEach(function (tabList) {
+      var group = tabList.dataset.tabGroup;
+      var tabs = Array.prototype.slice.call(tabList.querySelectorAll("[data-tab-target]"));
+      var panels = Array.prototype.slice.call(
+        document.querySelectorAll("[data-panel-group='" + group + "']")
+      );
+
+      function activate(target, focusTab) {
+        var matched = false;
+        tabs.forEach(function (tab) {
+          var active = tab.dataset.tabTarget === target;
+          matched = matched || active;
+          tab.classList.toggle("active", active);
+          tab.setAttribute("aria-selected", active ? "true" : "false");
+          tab.tabIndex = active ? 0 : -1;
+          if (active && focusTab) {
+            tab.focus();
+          }
+        });
+        if (!matched) {
+          return;
+        }
+        panels.forEach(function (panel) {
+          panel.hidden = panel.dataset.panelView !== target;
+        });
+        try {
+          window.localStorage.setItem("lenscast-studio-tab-" + group, target);
+        } catch (error) {
+          // Private browsing can deny localStorage without affecting the controls.
+        }
+      }
+
+      tabs.forEach(function (tab, index) {
+        tab.addEventListener("click", function () {
+          activate(tab.dataset.tabTarget, false);
+        });
+        tab.addEventListener("keydown", function (event) {
+          if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") {
+            return;
+          }
+          event.preventDefault();
+          var direction = event.key === "ArrowRight" ? 1 : -1;
+          var nextIndex = (index + direction + tabs.length) % tabs.length;
+          activate(tabs[nextIndex].dataset.tabTarget, true);
+        });
+      });
+
+      var initialTarget = tabs[0] ? tabs[0].dataset.tabTarget : "";
+      try {
+        initialTarget = window.localStorage.getItem("lenscast-studio-tab-" + group) || initialTarget;
+      } catch (error) {
+        // Use the first tab if localStorage is unavailable.
+      }
+      activate(initialTarget, false);
+    });
+  }
+
   function refreshControls() {
     if (!settings) {
       return;
@@ -858,6 +917,7 @@
   }
 
   function boot() {
+    setupPanelTabs();
     requestJson("/api/settings").then(function (initialSettings) {
       settings = initialSettings;
       refreshControls();
