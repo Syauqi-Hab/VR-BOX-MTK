@@ -3,6 +3,8 @@ package com.syauqihab.lenscastvr;
 import android.annotation.SuppressLint;
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.content.ClipData;
+import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.ActivityInfo;
 import android.content.pm.ApplicationInfo;
@@ -23,6 +25,7 @@ import android.webkit.WebResourceRequest;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
+import android.webkit.ValueCallback;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.FrameLayout;
@@ -32,6 +35,8 @@ public final class MainActivity extends Activity {
     private static final String PREFERENCES = "lenscast_vr";
     private static final String ENDPOINT_KEY = "endpoint";
     private static final String DEFAULT_ENDPOINT = "http://127.0.0.1:8264/phone";
+    private static final String LOCAL_VIDEO_URL = "file:///android_asset/video_vr.html";
+    private static final int VIDEO_PICKER_REQUEST = 4102;
     private static final long CONNECTION_CHIP_TIMEOUT_MS = 4_000L;
     private static final long RECONNECT_DELAY_MS = 2_000L;
 
@@ -41,7 +46,10 @@ public final class MainActivity extends Activity {
 
     private WebView webView;
     private Button connectionButton;
+    private Button modeButton;
+    private ValueCallback<Uri[]> videoFileCallback;
     private boolean mainFrameLoadFailed;
+    private boolean localVideoMode;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -52,6 +60,8 @@ public final class MainActivity extends Activity {
 
         webView = findViewById(R.id.lenscast_webview);
         connectionButton = findViewById(R.id.connection_button);
+        modeButton = findViewById(R.id.mode_button);
+        modeButton.setOnClickListener(view -> showModeDialog());
         connectionButton.setOnClickListener(view -> {
             if (mainFrameLoadFailed) {
                 loadLensCast();
@@ -60,7 +70,7 @@ public final class MainActivity extends Activity {
             }
         });
         webView.setOnLongClickListener(view -> {
-            showEndpointDialog();
+            showModeDialog();
             return true;
         });
 
@@ -80,8 +90,8 @@ public final class MainActivity extends Activity {
         settings.setMediaPlaybackRequiresUserGesture(false);
         settings.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
         settings.setCacheMode(WebSettings.LOAD_NO_CACHE);
-        settings.setAllowFileAccess(false);
-        settings.setAllowContentAccess(false);
+        settings.setAllowFileAccess(true);
+        settings.setAllowContentAccess(true);
         settings.setSupportZoom(false);
         settings.setBuiltInZoomControls(false);
         settings.setDisplayZoomControls(false);
@@ -90,11 +100,39 @@ public final class MainActivity extends Activity {
         WebView.setWebContentsDebuggingEnabled(
                 (getApplicationInfo().flags & ApplicationInfo.FLAG_DEBUGGABLE) != 0
         );
-        webView.setWebChromeClient(new WebChromeClient());
+        webView.setWebChromeClient(new WebChromeClient() {
+            @Override
+            public boolean onShowFileChooser(
+                    WebView view,
+                    ValueCallback<Uri[]> filePathCallback,
+                    FileChooserParams fileChooserParams
+            ) {
+                if (videoFileCallback != null) {
+                    videoFileCallback.onReceiveValue(null);
+                }
+                videoFileCallback = filePathCallback;
+
+                Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+                intent.addCategory(Intent.CATEGORY_OPENABLE);
+                intent.setType("video/*");
+                intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                intent.addFlags(Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
+                try {
+                    startActivityForResult(intent, VIDEO_PICKER_REQUEST);
+                } catch (android.content.ActivityNotFoundException error) {
+                    videoFileCallback.onReceiveValue(null);
+                    videoFileCallback = null;
+                    return false;
+                }
+                return true;
+            }
+        });
         webView.setWebViewClient(new WebViewClient() {
             @Override
             public void onPageStarted(WebView view, String url, android.graphics.Bitmap favicon) {
-                mainFrameLoadFailed = false;
+                if (!localVideoMode) {
+                    mainFrameLoadFailed = false;
+                }
             }
 
             @Override
@@ -105,6 +143,10 @@ public final class MainActivity extends Activity {
 
             @Override
             public void onPageFinished(WebView view, String url) {
+                if (localVideoMode) {
+                    connectionButton.setVisibility(View.GONE);
+                    return;
+                }
                 if (!mainFrameLoadFailed) {
                     handler.removeCallbacks(retryConnection);
                     showConnectionChip(false);
@@ -117,6 +159,9 @@ public final class MainActivity extends Activity {
                     WebResourceRequest request,
                     WebResourceError error
             ) {
+                if (localVideoMode) {
+                    return;
+                }
                 if (request.isForMainFrame()) {
                     mainFrameLoadFailed = true;
                     connectionButton.setText("PC belum terhubung - coba lagi");
@@ -130,10 +175,40 @@ public final class MainActivity extends Activity {
 
     private void loadLensCast() {
         handler.removeCallbacks(retryConnection);
+        localVideoMode = false;
         mainFrameLoadFailed = false;
         updateConnectionButton();
+        connectionButton.setVisibility(View.VISIBLE);
+        modeButton.setText("Mode: PC");
         webView.loadUrl(getEndpoint());
         showConnectionChip(false);
+    }
+
+    private void loadLocalVideo() {
+        handler.removeCallbacks(retryConnection);
+        localVideoMode = true;
+        mainFrameLoadFailed = false;
+        connectionButton.setVisibility(View.GONE);
+        modeButton.setText("Mode: Video");
+        webView.loadUrl(LOCAL_VIDEO_URL);
+        enterImmersiveMode();
+    }
+
+    private void showModeDialog() {
+        String[] modes = {"PC Mirror", "Video dari penyimpanan HP"};
+        int selected = localVideoMode ? 1 : 0;
+        new AlertDialog.Builder(this)
+                .setTitle("Pilih mode LensCast")
+                .setSingleChoiceItems(modes, selected, (dialog, which) -> {
+                    dialog.dismiss();
+                    if (which == 1) {
+                        loadLocalVideo();
+                    } else {
+                        loadLensCast();
+                    }
+                })
+                .setNegativeButton("Batal", null)
+                .show();
     }
 
     private String getEndpoint() {
@@ -235,6 +310,37 @@ public final class MainActivity extends Activity {
     }
 
     @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode != VIDEO_PICKER_REQUEST || videoFileCallback == null) {
+            return;
+        }
+
+        Uri[] result = null;
+        if (resultCode == RESULT_OK && data != null) {
+            Uri uri = data.getData();
+            if (uri != null) {
+                try {
+                    getContentResolver().takePersistableUriPermission(
+                            uri,
+                            Intent.FLAG_GRANT_READ_URI_PERMISSION
+                    );
+                } catch (SecurityException ignored) {
+                    // The temporary picker grant remains valid for this playback session.
+                }
+                result = new Uri[]{uri};
+            } else {
+                ClipData clipData = data.getClipData();
+                if (clipData != null && clipData.getItemCount() > 0) {
+                    result = new Uri[]{clipData.getItemAt(0).getUri()};
+                }
+            }
+        }
+        videoFileCallback.onReceiveValue(result);
+        videoFileCallback = null;
+    }
+
+    @Override
     public void onWindowFocusChanged(boolean hasFocus) {
         super.onWindowFocusChanged(hasFocus);
         if (hasFocus) {
@@ -278,7 +384,7 @@ public final class MainActivity extends Activity {
         super.onResume();
         webView.onResume();
         enterImmersiveMode();
-        if (mainFrameLoadFailed) {
+        if (!localVideoMode && mainFrameLoadFailed) {
             loadLensCast();
         }
     }
@@ -286,6 +392,10 @@ public final class MainActivity extends Activity {
     @Override
     protected void onDestroy() {
         handler.removeCallbacksAndMessages(null);
+        if (videoFileCallback != null) {
+            videoFileCallback.onReceiveValue(null);
+            videoFileCallback = null;
+        }
         webView.stopLoading();
         webView.destroy();
         super.onDestroy();

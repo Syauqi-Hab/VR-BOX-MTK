@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#000000">
+  <title>LensCast Local VR Video</title>
+  <link rel="stylesheet" href="video_vr.css">
+</head>
+<body>
+  <main class="vr-stage" id="vrStage">
+    <canvas id="vrCanvas" aria-label="Pemutar video VR dua mata"></canvas>
+    <video id="sourceVideo" playsinline preload="metadata"></video>
+    <div class="eye-divider" aria-hidden="true"></div>
+  </main>
+
+  <section class="welcome-card" id="welcomeCard">
+    <span class="eyebrow">LENSCAST / LOCAL VIDEO</span>
+    <h1>Putar video HP di layar VR.</h1>
+    <p>Video diproses langsung di perangkat. Tidak membutuhkan PC, internet, atau screen mirroring.</p>
+    <label class="primary-action">
+      <input id="videoInput" type="file" accept="video/*">
+      Pilih video dari HP
+    </label>
+    <small id="welcomeStatus">Format yang didukung mengikuti decoder video Android.</small>
+  </section>
+
+  <section class="player-chrome" id="playerChrome" hidden>
+    <header class="top-bar">
+      <div class="video-identity">
+        <span class="live-dot"></span>
+        <div>
+          <b id="videoName">Video lokal</b>
+          <small id="videoMeta">Menyiapkan video...</small>
+        </div>
+      </div>
+      <div class="top-actions">
+        <label class="compact-select">
+          <span>Format</span>
+          <select id="sourceMode">
+            <option value="flat">Video biasa</option>
+            <option value="sbs">SBS 3D</option>
+            <option value="ou">Atas-bawah 3D</option>
+          </select>
+        </label>
+        <label class="compact-select">
+          <span>Tampilan</span>
+          <select id="fitMode">
+            <option value="contain">Pas</option>
+            <option value="cover">Penuhi</option>
+            <option value="stretch">Regang</option>
+          </select>
+        </label>
+        <button id="changeVideoButton" type="button">Ganti video</button>
+        <button id="settingsButton" type="button">Kalibrasi</button>
+      </div>
+    </header>
+
+    <footer class="transport-bar">
+      <button class="play-button" id="playButton" type="button" aria-label="Putar video">▶</button>
+      <time id="currentTime">0:00</time>
+      <input id="seekBar" type="range" min="0" max="1000" value="0" step="1" aria-label="Posisi video">
+      <time id="duration">0:00</time>
+      <button id="recenterButton" type="button">Reset view</button>
+    </footer>
+  </section>
+
+  <aside class="settings-sheet" id="settingsSheet" aria-label="Kalibrasi video VR" hidden>
+    <div class="sheet-head">
+      <div>
+        <span class="eyebrow">VR CALIBRATION</span>
+        <h2>Sesuaikan dengan lensa</h2>
+      </div>
+      <button id="closeSettingsButton" type="button">Tutup</button>
+    </div>
+    <div class="control-grid">
+      <label>
+        <span>Ukuran layar <output data-output="screenSize"></output></span>
+        <input data-setting="screenSize" type="range" min="50" max="100" value="88" step="1">
+      </label>
+      <label>
+        <span>Jarak mata <output data-output="eyeGap"></output></span>
+        <input data-setting="eyeGap" type="range" min="0" max="16" value="4" step="0.5">
+      </label>
+      <label>
+        <span>Zoom <output data-output="zoom"></output></span>
+        <input data-setting="zoom" type="range" min="60" max="180" value="100" step="1">
+      </label>
+      <label>
+        <span>Barrel <output data-output="barrel"></output></span>
+        <input data-setting="barrel" type="range" min="-35" max="50" value="8" step="1">
+      </label>
+      <label>
+        <span>Kecerahan <output data-output="brightness"></output></span>
+        <input data-setting="brightness" type="range" min="50" max="150" value="100" step="1">
+      </label>
+    </div>
+    <button class="secondary-action" id="resetSettingsButton" type="button">Kembalikan pengaturan awal</button>
+  </aside>
+
+  <div class="tap-hint" id="tapHint">Ketuk layar untuk menampilkan kontrol</div>
+  <script src="video_vr.js"></script>
+</body>
+</html>

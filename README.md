@@ -132,6 +132,19 @@ The APK output is
 (API 26) or later. Tap the connection chip, or long-press the image, to change
 the saved PC endpoint when needed.
 
+### Local VR Video prototype
+
+The Android app also runs as a standalone VR video player without LensCast PC:
+
+1. Open **LensCast VR** and tap **Mode: PC** in the top-left corner.
+2. Select **Video dari penyimpanan HP**.
+3. Tap **Pilih video dari HP** and choose a video through Android's system picker.
+4. Choose **Video biasa**, **SBS 3D**, or **Atas-bawah 3D**, then place the phone
+   in the VR Box. Playback, seeking, audio, and optical calibration run locally.
+
+The picker uses Android's Storage Access Framework, so LensCast only receives
+access to the selected video and does not request broad storage permission.
+
 ## Practical setup for games
 
 1. Start LensCast before starting the game.

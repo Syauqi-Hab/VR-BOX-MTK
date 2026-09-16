@@ -12,6 +12,22 @@
       android:keepScreenOn="true" />
 
   <Button
+      android:id="@+id/mode_button"
+      android:layout_width="wrap_content"
+      android:layout_height="40dp"
+      android:layout_gravity="top|start"
+      android:layout_margin="12dp"
+      android:alpha="0.94"
+      android:background="@drawable/connection_chip"
+      android:contentDescription="Pilih mode LensCast"
+      android:minWidth="0dp"
+      android:paddingHorizontal="14dp"
+      android:text="Mode: PC"
+      android:textAllCaps="false"
+      android:textColor="#E8F7DC"
+      android:textSize="12sp" />
+
+  <Button
       android:id="@+id/connection_button"
       android:layout_width="wrap_content"
       android:layout_height="40dp"
